@@ -1,9 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
+import urllib.request
+import json
+import re
+import sqlite3
 
 def read_bible():
     import urllib.parse
     import urllib.request
+    import json
 
     passage = input("Enter Bible passage (example: John 3:16): ")
 
@@ -34,6 +39,266 @@ def read_bible():
     except Exception as e:
         print("Unable to retrieve passage.")
         print("Error:", e)
+
+OPENBIBLE_FILE = "/home/tim/BibleStudy/cross_references.txt"
+
+OPENBIBLE_BOOKS = {
+    "Genesis": "Gen", "Exodus": "Exod", "Leviticus": "Lev",
+    "Numbers": "Num", "Deuteronomy": "Deut", "Joshua": "Josh",
+    "Judges": "Judg", "Ruth": "Ruth", "1 Samuel": "1Sam",
+    "2 Samuel": "2Sam", "1 Kings": "1Kgs", "2 Kings": "2Kgs",
+    "1 Chronicles": "1Chr", "2 Chronicles": "2Chr",
+    "Ezra": "Ezra", "Nehemiah": "Neh", "Esther": "Est",
+    "Job": "Job", "Psalms": "Ps", "Psalm": "Ps", "Proverbs": "Prov",
+    "Ecclesiastes": "Eccl", "Song of Solomon": "Song",
+    "Isaiah": "Isa", "Jeremiah": "Jer", "Lamentations": "Lam",
+    "Ezekiel": "Ezek", "Daniel": "Dan", "Hosea": "Hos",
+    "Joel": "Joel", "Amos": "Amos", "Obadiah": "Obad",
+    "Jonah": "Jonah", "Micah": "Mic", "Nahum": "Nah",
+    "Habakkuk": "Hab", "Zephaniah": "Zeph", "Haggai": "Hag",
+    "Zechariah": "Zech", "Malachi": "Mal",
+
+    "Matthew": "Matt", "Mark": "Mark", "Luke": "Luke",
+    "John": "John", "Acts": "Acts", "Romans": "Rom",
+    "1 Corinthians": "1Cor", "2 Corinthians": "2Cor",
+    "Galatians": "Gal", "Ephesians": "Eph", "Philippians": "Phil",
+    "Colossians": "Col", "1 Thessalonians": "1Thess",
+    "2 Thessalonians": "2Thess", "1 Timothy": "1Tim",
+    "2 Timothy": "2Tim", "Titus": "Titus", "Philemon": "Phlm",
+    "Hebrews": "Heb", "James": "Jas", "1 Peter": "1Pet",
+    "2 Peter": "2Pet", "1 John": "1John", "2 John": "2John",
+    "3 John": "3John", "Jude": "Jude", "Revelation": "Rev"
+}
+
+
+def openbible_reference_to_readable(reference):
+    reverse_books = {}
+
+    for full_name, abbreviation in OPENBIBLE_BOOKS.items():
+        reverse_books[abbreviation] = full_name
+
+    def convert_single(ref):
+        parts = ref.split(".")
+
+        if len(parts) < 3:
+            return ref
+
+        book = reverse_books.get(parts[0], parts[0])
+        chapter = parts[1]
+        verse = parts[2]
+
+        return f"{book} {chapter}:{verse}"
+
+    if "-" not in reference:
+        return convert_single(reference)
+
+    start_ref, end_ref = reference.split("-", 1)
+
+    start_parts = start_ref.split(".")
+    end_parts = end_ref.split(".")
+
+    if len(start_parts) >= 3 and len(end_parts) >= 3:
+        start_book = reverse_books.get(
+            start_parts[0],
+            start_parts[0]
+        )
+
+        end_book = reverse_books.get(
+            end_parts[0],
+            end_parts[0]
+        )
+
+        start_chapter = start_parts[1]
+        start_verse = start_parts[2]
+
+        end_chapter = end_parts[1]
+        end_verse = end_parts[2]
+
+        if (
+            start_book == end_book
+            and start_chapter == end_chapter
+        ):
+            return (
+                f"{start_book} {start_chapter}:"
+                f"{start_verse}–{end_verse}"
+            )
+
+        if start_book == end_book:
+            return (
+                f"{start_book} {start_chapter}:{start_verse}"
+                f"–{end_chapter}:{end_verse}"
+            )
+
+        return (
+            f"{start_book} {start_chapter}:{start_verse}"
+            f" – {end_book} {end_chapter}:{end_verse}"
+        )
+
+    return convert_single(reference)
+
+
+
+def get_openbible_cross_references(book, chapter, verse):
+    dataset_book = OPENBIBLE_BOOKS.get(book)
+
+    if not dataset_book:
+        return []
+
+    search_verse = f"{dataset_book}.{chapter}.{verse}"
+
+    results = []
+
+    try:
+        with open(OPENBIBLE_FILE, encoding="utf-8") as f:
+            next(f)
+
+            for line in f:
+                parts = line.strip().split("\t")
+
+                if len(parts) < 3:
+                    continue
+
+                from_verse, to_verse, votes = parts[:3]
+
+                if from_verse == search_verse:
+                    try:
+                        results.append(
+                            (to_verse, int(votes))
+                        )
+                    except ValueError:
+                        pass
+
+    except FileNotFoundError:
+        return []
+
+    results.sort(key=lambda item: item[1], reverse=True)
+
+    return results
+
+COMMENTARY_API = "https://bible.helloao.org/api/c"
+
+
+COMMENTARIES = {
+    "Matthew Henry": "matthew-henry",
+    "Adam Clarke": "adam-clarke",
+    "John Gill": "john-gill",
+    "John Calvin": "john-calvin",
+    "Jamieson-Fausset-Brown": "jamieson-fausset-brown",
+    "Keil & Delitzsch": "keil-delitzsch",
+    "Tyndale": "tyndale"
+}
+
+
+COMMENTARY_BOOKS = {
+    "Genesis": "GEN", "Exodus": "EXO", "Leviticus": "LEV",
+    "Numbers": "NUM", "Deuteronomy": "DEU", "Joshua": "JOS",
+    "Judges": "JDG", "Ruth": "RUT", "1 Samuel": "1SA",
+    "2 Samuel": "2SA", "1 Kings": "1KI", "2 Kings": "2KI",
+    "1 Chronicles": "1CH", "2 Chronicles": "2CH",
+    "Ezra": "EZR", "Nehemiah": "NEH", "Esther": "EST",
+    "Job": "JOB", "Psalms": "PSA", "Psalm": "PSA",
+    "Proverbs": "PRO", "Ecclesiastes": "ECC",
+    "Song of Solomon": "SNG", "Isaiah": "ISA",
+    "Jeremiah": "JER", "Lamentations": "LAM",
+    "Ezekiel": "EZK", "Daniel": "DAN", "Hosea": "HOS",
+    "Joel": "JOL", "Amos": "AMO", "Obadiah": "OBA",
+    "Jonah": "JON", "Micah": "MIC", "Nahum": "NAM",
+    "Habakkuk": "HAB", "Zephaniah": "ZEP", "Haggai": "HAG",
+    "Zechariah": "ZEC", "Malachi": "MAL",
+    "Matthew": "MAT", "Mark": "MRK", "Luke": "LUK",
+    "John": "JHN", "Acts": "ACT", "Romans": "ROM",
+    "1 Corinthians": "1CO", "2 Corinthians": "2CO",
+    "Galatians": "GAL", "Ephesians": "EPH",
+    "Philippians": "PHP", "Colossians": "COL",
+    "1 Thessalonians": "1TH", "2 Thessalonians": "2TH",
+    "1 Timothy": "1TI", "2 Timothy": "2TI",
+    "Titus": "TIT", "Philemon": "PHM", "Hebrews": "HEB",
+    "James": "JAS", "1 Peter": "1PE", "2 Peter": "2PE",
+    "1 John": "1JN", "2 John": "2JN", "3 John": "3JN",
+    "Jude": "JUD", "Revelation": "REV"
+}
+
+def get_commentary_section(commentary_id, book, chapter, verse):
+    api_book = COMMENTARY_BOOKS.get(book)
+
+    if not api_book:
+        return {
+            "status": "book_mapping_missing",
+            "text": None
+        }
+
+    url = (
+        f"{COMMENTARY_API}/{commentary_id}/"
+        f"{api_book}/{chapter}.simple.json"
+    )
+
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        sections = data.get("chapter", {}).get("content", [])
+
+        best_section = None
+
+        for section in sections:
+            try:
+                section_verse = int(section.get("number"))
+            except (TypeError, ValueError):
+                continue
+
+            if section_verse <= verse:
+                if (
+                    best_section is None
+                    or section_verse > best_section[0]
+                ):
+                    text = section.get("text", "")
+
+                    if isinstance(text, list):
+                        text = " ".join(
+                            str(item) for item in text
+                        )
+
+                    text = str(text).strip()
+
+                    if text:
+                        best_section = (
+                            section_verse,
+                            text
+                        )
+
+        if best_section:
+            return {
+                "status": "success",
+                "text": best_section[1]
+            }
+
+        return {
+            "status": "no_section",
+            "text": None
+        }
+
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {
+                "status": "not_available",
+                "text": None
+            }
+
+        print("Commentary HTTP error:", e)
+
+        return {
+            "status": "error",
+            "text": None
+        }
+
+    except Exception as e:
+        print("Commentary error:", e)
+
+        return {
+            "status": "error",
+            "text": None
+        }
+
 def show_bible_reader():
     import urllib.parse
     import urllib.request
@@ -103,6 +368,7 @@ def show_bible_reader():
 
             if verses:
                 first_verse = verses[0]
+
                 match = re.match(
                     r"(\d+):(\d+)\s+(.*)",
                     first_verse
@@ -111,9 +377,11 @@ def show_bible_reader():
                 if match:
                     chapter = match.group(1)
 
+                    verse_number = match.group(2)
+
                     text_box.insert(
                         tk.END,
-                        f"{chapter}:{match.group(2)}  "
+                        f"{chapter}:{verse_number}  "
                         f"{match.group(3)}\n\n"
                     )
 
@@ -134,11 +402,63 @@ def show_bible_reader():
                                 tk.END,
                                 verse.strip() + "\n\n"
                             )
+
+                    passage_match = re.match(
+                        r"((?:[1-3]\s)?[A-Za-z ]+)\s+(\d+)",
+                        passage
+                    )
+
+                    if passage_match:
+                        book = passage_match.group(1).strip()
+
+                        text_box.insert(
+                            tk.END,
+                            "\n" + "=" * 60 + "\n"
+                        )
+
+                        text_box.insert(
+                            tk.END,
+                            "CROSS REFERENCES\n"
+                        )
+
+                        text_box.insert(
+                            tk.END,
+                            "=" * 60 + "\n\n"
+                        )
+
+                        references = get_openbible_cross_references(
+                            book,
+                            chapter,
+                            verse_number
+                        )
+
+                        if references:
+                            for reference, votes in references[:5]:
+                                readable = (
+                                    openbible_reference_to_readable(
+                                        reference
+                                    )
+                                )
+
+                                text_box.insert(
+                                    tk.END,
+                                    f"• {readable}\n"
+                                )
+                        else:
+                            text_box.insert(
+                                tk.END,
+                                "No cross references found.\n"
+                            )
+
                 else:
-                    text_box.insert(tk.END, text.strip())
+                    text_box.insert(
+                        tk.END,
+                        text.strip()
+                    )
 
         except Exception as error:
             text_box.delete("1.0", tk.END)
+
             text_box.insert(
                 tk.END,
                 f"Unable to retrieve the Bible passage.\n\n"
@@ -157,6 +477,43 @@ def show_bible_reader():
         command=lambda: show_constable_notes(passage_entry.get().strip())
     ).pack(side="left", padx=5)
 
+    def open_commentaries():
+        commentary_window = tk.Toplevel(window)
+        commentary_window.title("Commentaries")
+        commentary_window.geometry("400x450")
+
+        ttk.Label(
+            commentary_window,
+            text="Select a Commentary",
+            font=("TkDefaultFont", 16, "bold")
+        ).pack(pady=15)
+
+        commentary_options = [
+            ("Matthew Henry", "matthew-henry"),
+            ("Adam Clarke", "adam-clarke"),
+            ("John Gill", "john-gill"),
+            ("John Calvin", "john-calvin"),
+            ("Jamieson-Fausset-Brown", "jamieson-fausset-brown"),
+            ("Keil & Delitzsch", "keil-delitzsch"),
+            ("Tyndale", "tyndale")
+        ]
+
+        for name, commentary_id in commentary_options:
+            ttk.Button(
+                commentary_window,
+                text=name,
+                command=lambda cid=commentary_id: show_commentary(
+                    passage_entry.get().strip(),
+                    cid
+                )
+            ).pack(fill="x", padx=40, pady=5)
+
+    ttk.Button(
+        input_frame,
+        text="Commentaries",
+        command=open_commentaries
+    ).pack(side="left", padx=5)
+
     ttk.Button(
         window,
         text="Close",
@@ -164,6 +521,195 @@ def show_bible_reader():
     ).pack(pady=(0, 15))
 
     passage_entry.focus()
+def show_commentary(passage, commentary_id):
+    match = re.match(
+        r"^\s*(\d?\s*[A-Za-z]+(?:\s+[A-Za-z]+)*)\s+"
+        r"(\d+):(\d+)",
+        passage
+    )
+
+    if not match:
+        return
+
+    book = match.group(1).strip()
+    chapter = int(match.group(2))
+    verse = int(match.group(3))
+
+    commentary_names = {
+        "adam-clarke": "Adam Clarke Bible Commentary",
+        "matthew-henry": "Matthew Henry Bible Commentary",
+        "john-gill": "John Gill Bible Commentary",
+        "john-calvin": "John Calvin's Commentaries",
+        "jamieson-fausset-brown":
+            "Jamieson-Fausset-Brown Bible Commentary",
+        "keil-delitzsch":
+            "Keil & Delitzsch Old Testament Commentary",
+        "tyndale": "Tyndale Open Study Notes"
+    }
+
+    commentary_name = commentary_names.get(
+        commentary_id,
+        commentary_id
+    )
+
+
+    window = tk.Toplevel()
+    window.title(commentary_name)
+    window.geometry("900x700")
+
+    ttk.Label(
+        window,
+        text=commentary_name,
+        font=("TkDefaultFont", 18, "bold")
+    ).pack(pady=15)
+
+    ttk.Label(
+        window,
+        text=f"Passage: {passage}",
+        font=("TkDefaultFont", 12)
+    ).pack(pady=(0, 10))
+
+    text_box = tk.Text(
+        window,
+        wrap="word",
+        font=("TkDefaultFont", 11)
+    )
+    text_box.pack(
+        fill="both",
+        expand=True,
+        padx=20,
+        pady=10
+    )
+
+    scrollbar = ttk.Scrollbar(
+        window,
+        orient="vertical",
+        command=text_box.yview
+    )
+    scrollbar.pack(side="right", fill="y")
+
+    text_box.configure(yscrollcommand=scrollbar.set)
+
+    result = get_commentary_section(
+        commentary_id,
+        book,
+        chapter,
+        verse
+    )
+
+    status = result.get("status")
+    text = result.get("text")
+
+    if status == "success":
+        text_box.insert(tk.END, text)
+
+    elif status == "not_available":
+        text_box.insert(
+            tk.END,
+            f"{commentary_name} does not contain "
+            f"commentary for {book} {chapter}."
+        )
+
+    elif status == "book_mapping_missing":
+        text_box.insert(
+            tk.END,
+            f"The Bible book '{book}' is not currently "
+            f"mapped in the commentary system."
+        )
+
+    elif status == "no_section":
+        text_box.insert(
+            tk.END,
+            "No specific commentary section was found "
+            "for this verse."
+        )
+
+    else:
+        text_box.insert(
+            tk.END,
+            "Unable to retrieve commentary at this time."
+        )
+
+    text_box.configure(state="disabled")
+
+    def save_commentary():
+        commentary_text = text_box.get("1.0", tk.END).strip()
+
+        if not commentary_text:
+            return
+
+        save_window = tk.Toplevel(window)
+        save_window.title("Save Commentary")
+        save_window.geometry("500x350")
+
+        ttk.Label(
+            save_window,
+            text="Save Commentary to Personal Bible Study",
+            font=("TkDefaultFont", 14, "bold")
+        ).pack(pady=15)
+
+        ttk.Label(
+            save_window,
+            text="Study Title:"
+        ).pack(anchor="w", padx=20)
+
+        title_entry = ttk.Entry(save_window, width=60)
+        title_entry.pack(fill="x", padx=20, pady=(0, 10))
+
+        ttk.Label(
+            save_window,
+            text="Study Notes:"
+        ).pack(anchor="w", padx=20)
+
+        notes_text = tk.Text(
+            save_window,
+            height=10,
+            wrap="word"
+        )
+        notes_text.pack(
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=(0, 10)
+        )
+
+        notes_text.insert(tk.END, commentary_text)
+
+        def save_study():
+            title = title_entry.get().strip()
+            content = notes_text.get("1.0", tk.END).strip()
+
+            if not title or not content:
+                return
+
+            conn = sqlite3.connect("/home/tim/BibleStudy/bible_study.db")
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO personal_studies
+                (title, reference, content, created_at)
+                VALUES (?, ?, ?, datetime('now'))
+                """,
+                (title, passage, content)
+            )
+
+            conn.commit()
+            conn.close()
+
+            save_window.destroy()
+
+        ttk.Button(
+            save_window,
+            text="Save Study",
+            command=save_study
+        ).pack(pady=10)
+
+    ttk.Button(
+        window,
+        text="Save to Personal Bible Study",
+        command=save_commentary
+    ).pack(pady=(5, 10))
 
 def show_constable_notes(passage):
     import urllib.request
