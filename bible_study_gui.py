@@ -3152,6 +3152,8 @@ def show_calendar(parent):
                 sticky="nsew"
             )
 
+        calendar.setfirstweekday(calendar.SUNDAY)
+
         month_days = calendar.monthcalendar(
             current_year,
             current_month
@@ -4423,6 +4425,8 @@ def main():
             fg="#3f2f24",
             width=5
         ).pack(side="left", padx=2)
+
+    calendar.setfirstweekday(calendar.SUNDAY)
 
     for week in calendar.monthcalendar(today.year, today.month):
         week_frame = tk.Frame(
