@@ -4,6 +4,35 @@ import urllib.request
 import json
 import re
 import sqlite3
+import calendar
+
+
+# Bible Study color theme
+BG_COLOR = "#f4f1ea"
+HEADER_COLOR = "#3f2f24"
+HEADER_TEXT_COLOR = "#f5e6c8"
+SECONDARY_COLOR = "#e8d8bd"
+TEXT_COLOR = "#3f2f24"
+
+
+def style_bible_window(window, title, height=15):
+    window.configure(bg=BG_COLOR)
+
+    header = tk.Frame(
+        window,
+        bg=HEADER_COLOR
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
+        text=title,
+        font=("TkDefaultFont", 20, "bold"),
+        bg=HEADER_COLOR,
+        fg=HEADER_TEXT_COLOR
+    ).pack(pady=15)
+
+    return header
 
 def read_bible():
     import urllib.parse
@@ -306,16 +335,43 @@ def show_bible_reader():
 
     window = tk.Toplevel()
     window.title("Read NET Bible")
-    window.geometry("850x650")
+    window.geometry("700x600")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
-        text="NET Bible Reader",
-        font=("TkDefaultFont", 18, "bold")
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
+        text="NET BIBLE READER",
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
     ).pack(pady=15)
 
     input_frame = ttk.Frame(window)
     input_frame.pack(fill="x", padx=20)
+
+    version_frame = ttk.Frame(window)
+    version_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+    ttk.Label(
+        version_frame,
+        text="Bible Version:"
+    ).pack(side="left")
+
+    bible_version = ttk.Combobox(
+        version_frame,
+        values=["NET", "CSB", "ESV"],
+        state="readonly",
+        width=12
+    )
+    bible_version.set("NET")
+    bible_version.pack(side="left", padx=10)
 
     ttk.Label(
         input_frame,
@@ -343,12 +399,103 @@ def show_bible_reader():
     scrollbar.pack(side="right", fill="y")
 
     text_box.configure(yscrollcommand=scrollbar.set)
+    def copy_selected_text(event=None):
+        try:
+            selected_text = text_box.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            return
+
+        window.clipboard_clear()
+        window.clipboard_append(selected_text)
+        window.update()
+
+    context_menu = tk.Menu(window, tearoff=0)
+    context_menu.add_command(
+        label="Copy",
+        command=copy_selected_text
+    )
+
+    def select_all_text():
+        text_box.tag_remove(tk.SEL, "1.0", tk.END)
+
+        cross_ref_start = text_box.search(
+            "=" * 60,
+            "1.0",
+            tk.END
+        )
+
+        if cross_ref_start:
+            text_box.tag_add(
+                tk.SEL,
+                "1.0",
+                cross_ref_start
+            )
+        else:
+            text_box.tag_add(
+                tk.SEL,
+                "1.0",
+                tk.END
+            )
+
+        text_box.mark_set(tk.INSERT, "1.0")
+        text_box.see(tk.INSERT)
+
+    context_menu.add_command(
+        label="Select All",
+        command=select_all_text
+    )
+
+    def show_context_menu(event):
+        try:
+            text_box.selection_get()
+            context_menu.tk_popup(event.x_root, event.y_root)
+        except tk.TclError:
+            pass
+
+    text_box.bind("<Button-3>", show_context_menu)
 
     def load_passage():
         passage = passage_entry.get().strip()
 
         if not passage:
             return
+
+        selected_version = bible_version.get()
+
+        if selected_version == "CSB":
+            import webbrowser
+
+            passage_match = re.match(
+                r"^\s*((?:[1-3]\s)?[A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(\d+)",
+                passage
+            )
+
+            if passage_match:
+                book = passage_match.group(1).strip().lower()
+                chapter = passage_match.group(2)
+
+                book = book.replace(" ", "-")
+
+                url = (
+                    "https://read.csbible.com/?book="
+                    + urllib.parse.quote(book)
+                    + "&chapter="
+                    + chapter
+                )
+
+                webbrowser.open(url)
+                return
+
+        if selected_version == "ESV":
+            import webbrowser
+            url = (
+                "https://www.esv.org/"
+                + urllib.parse.quote(passage)
+                + "/"
+            )
+            webbrowser.open(url)
+            return
+
 
         params = urllib.parse.urlencode({
             "passage": passage,
@@ -416,6 +563,8 @@ def show_bible_reader():
                             "\n" + "=" * 60 + "\n"
                         )
 
+                        text_box.mark_set("bible_end", tk.END)
+
                         text_box.insert(
                             tk.END,
                             "CROSS REFERENCES\n"
@@ -471,6 +620,11 @@ def show_bible_reader():
         command=load_passage
     ).pack(side="left", padx=5)
 
+    passage_entry.bind(
+        "<Return>",
+        lambda event: load_passage()
+    )
+
     ttk.Button(
         input_frame,
         text="Constable's Notes",
@@ -480,12 +634,22 @@ def show_bible_reader():
     def open_commentaries():
         commentary_window = tk.Toplevel(window)
         commentary_window.title("Commentaries")
-        commentary_window.geometry("400x450")
+        commentary_window.geometry("700x600")
+        commentary_window.attributes("-zoomed", True)
+        commentary_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             commentary_window,
-            text="Select a Commentary",
-            font=("TkDefaultFont", 16, "bold")
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
+            text="SELECT A COMMENTARY",
+            font=("TkDefaultFont", 20, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         commentary_options = [
@@ -506,7 +670,7 @@ def show_bible_reader():
                     passage_entry.get().strip(),
                     cid
                 )
-            ).pack(fill="x", padx=40, pady=5)
+            ).pack(fill="x", padx=100, pady=5)
 
     ttk.Button(
         input_frame,
@@ -522,18 +686,27 @@ def show_bible_reader():
 
     passage_entry.focus()
 def show_commentary(passage, commentary_id):
-    match = re.match(
-        r"^\s*(\d?\s*[A-Za-z]+(?:\s+[A-Za-z]+)*)\s+"
-        r"(\d+):(\d+)",
-        passage
-    )
+    passage = passage.strip()
+
+    match = re.match(r"^(.*?)\s+(\d+):(\d+)", passage)
 
     if not match:
+        messagebox.showerror(
+            "Invalid Passage",
+            "Please enter a passage such as Romans 8:1."
+        )
         return
 
     book = match.group(1).strip()
     chapter = int(match.group(2))
     verse = int(match.group(3))
+
+    if book not in COMMENTARY_BOOKS:
+        messagebox.showerror(
+            "Invalid Bible Book",
+            f"The Bible book '{book}' is not recognized."
+        )
+        return
 
     commentary_names = {
         "adam-clarke": "Adam Clarke Bible Commentary",
@@ -555,19 +728,31 @@ def show_commentary(passage, commentary_id):
 
     window = tk.Toplevel()
     window.title(commentary_name)
-    window.geometry("900x700")
+    window.geometry("700x600")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text=commentary_name,
-        font=("TkDefaultFont", 18, "bold")
+        font=("TkDefaultFont", 18, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
     ).pack(pady=15)
 
-    ttk.Label(
+    tk.Label(
         window,
         text=f"Passage: {passage}",
-        font=("TkDefaultFont", 12)
-    ).pack(pady=(0, 10))
+        font=("TkDefaultFont", 12),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(pady=(10, 5))
 
     text_box = tk.Text(
         window,
@@ -640,12 +825,21 @@ def show_commentary(passage, commentary_id):
 
         save_window = tk.Toplevel(window)
         save_window.title("Save Commentary")
-        save_window.geometry("500x350")
+        save_window.geometry("650x450")
+        save_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             save_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
             text="Save Commentary to Personal Bible Study",
-            font=("TkDefaultFont", 14, "bold")
+            font=("TkDefaultFont", 14, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         ttk.Label(
@@ -829,18 +1023,30 @@ def show_constable_notes(passage):
     window = tk.Toplevel()
     window.title("Constable's Notes")
     window.geometry("900x700")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="CONSTABLE'S NOTES",
-        font=("TkDefaultFont", 20, "bold")
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
     ).pack(pady=15)
 
-    ttk.Label(
+    tk.Label(
         window,
         text=f"Passage: {passage}",
-        font=("TkDefaultFont", 12)
-    ).pack(pady=(0, 10))
+        font=("TkDefaultFont", 12),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(pady=(10, 5))
 
     text_frame = ttk.Frame(window)
     text_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -1001,9 +1207,9 @@ def show_constable_notes(passage):
 def show_dashboard():
     import sqlite3
 
-    db_path = "/home/tim/BibleStudy/bible_study.db"
-
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(
+        "/home/tim/BibleStudy/bible_study.db"
+    )
     cursor = conn.cursor()
 
     cursor.execute("SELECT COUNT(*) FROM notes")
@@ -1062,30 +1268,132 @@ def show_dashboard():
     conn.close()
 
     window = tk.Toplevel()
-    window.title("Study Dashboard")
-    window.geometry("700x600")
+    window.title("Bible Study Dashboard")
+    window.geometry("900x700")
+    window.attributes("-zoomed", True)
+    window.minsize(800, 600)
 
-    ttk.Label(
-        window,
-        text="BIBLE STUDY DASHBOARD",
-        font=("TkDefaultFont", 20, "bold")
-    ).pack(pady=20)
+    # Main background
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    # Header
+    header = tk.Frame(
         window,
-        text=f"Study Notes: {note_count}    "
-             f"Topics: {topic_count}    "
-             f"Cross-References: {cross_reference_count}    "
-             f"Personal Bible Studies: {personal_study_count}    "
-             f"Sermon Notes: {sermon_count}",
-        font=("TkDefaultFont", 12)
-    ).pack(pady=10)
+        bg="#3f2f24",
+        height=115
+    )
+    header.pack(fill="x")
+    header.pack_propagate(False)
 
-    ttk.Label(
+    tk.Label(
+        header,
+        text="📖  BIBLE STUDY",
+        font=("TkDefaultFont", 26, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=(20, 2))
+
+    tk.Label(
+        header,
+        text="Study Scripture • Grow in Faith • Keep Learning",
+        font=("TkDefaultFont", 11),
+        bg="#3f2f24",
+        fg="#e8d8bd"
+    ).pack()
+
+    # Content area
+    content = tk.Frame(
         window,
-        text="Topics",
-        font=("TkDefaultFont", 14, "bold")
-    ).pack(pady=(20, 5))
+        bg="#f4f1ea"
+    )
+    content.pack(fill="both", expand=True, padx=25, pady=20)
+
+    # Dashboard title
+    tk.Label(
+        content,
+        text="Study Dashboard",
+        font=("TkDefaultFont", 18, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(anchor="w", pady=(0, 15))
+
+    # Statistics cards
+    stats_frame = tk.Frame(
+        content,
+        bg="#f4f1ea"
+    )
+    stats_frame.pack(fill="x", pady=(0, 20))
+
+    stats = [
+        ("Study Notes", note_count, "#e8d8bd"),
+        ("Topics", topic_count, "#d9e6d2"),
+        ("Cross References", cross_reference_count, "#d7e3ef"),
+        ("Personal Studies", personal_study_count, "#ead8e8"),
+        ("Sermon Notes", sermon_count, "#f0dfc0")
+    ]
+
+    for title, count, card_bg in stats:
+        card = tk.Frame(
+            stats_frame,
+            bg=card_bg,
+            bd=1,
+            relief="solid"
+        )
+        card.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=5
+        )
+
+        tk.Label(
+            card,
+            text=str(count),
+            font=("TkDefaultFont", 22, "bold"),
+            bg=card_bg,
+            fg="#3f2f24"
+        ).pack(pady=(12, 2))
+
+        tk.Label(
+            card,
+            text=title,
+            font=("TkDefaultFont", 9, "bold"),
+            bg=card_bg,
+            fg="#5a4a3d",
+            wraplength=120
+        ).pack(pady=(0, 12))
+
+    # Lower sections
+    lower_frame = tk.Frame(
+        content,
+        bg="#f4f1ea"
+    )
+    lower_frame.pack(
+        fill="both",
+        expand=True
+    )
+
+    # Topics panel
+    topics_panel = tk.Frame(
+        lower_frame,
+        bg="white",
+        bd=1,
+        relief="solid"
+    )
+    topics_panel.pack(
+        side="left",
+        fill="both",
+        expand=True,
+        padx=(0, 8)
+    )
+
+    tk.Label(
+        topics_panel,
+        text="📚  Topics",
+        font=("TkDefaultFont", 14, "bold"),
+        bg="white",
+        fg="#3f2f24"
+    ).pack(anchor="w", padx=15, pady=(12, 8))
 
     topic_text = "\n".join(
         f"• {topic[0]} ({topic[1]} note{'s' if topic[1] != 1 else ''})"
@@ -1095,17 +1403,46 @@ def show_dashboard():
     if not topic_text:
         topic_text = "No topics yet."
 
-    ttk.Label(
-        window,
-        text=topic_text,
-        justify="left"
-    ).pack(anchor="w", padx=40)
+    topic_box = tk.Text(
+        topics_panel,
+        wrap="word",
+        height=10,
+        font=("TkDefaultFont", 10),
+        bg="white",
+        fg="#3f2f24",
+        bd=0,
+        highlightthickness=0
+    )
+    topic_box.pack(
+        fill="both",
+        expand=True,
+        padx=15,
+        pady=(0, 15)
+    )
+    topic_box.insert("1.0", topic_text)
+    topic_box.configure(state="disabled")
 
-    ttk.Label(
-        window,
-        text="Recent Studies",
-        font=("TkDefaultFont", 14, "bold")
-    ).pack(pady=(25, 5))
+    # Recent studies panel
+    recent_panel = tk.Frame(
+        lower_frame,
+        bg="white",
+        bd=1,
+        relief="solid"
+    )
+    recent_panel.pack(
+        side="left",
+        fill="both",
+        expand=True,
+        padx=(8, 0)
+    )
+
+    tk.Label(
+        recent_panel,
+        text="📝  Recent Studies",
+        font=("TkDefaultFont", 14, "bold"),
+        bg="white",
+        fg="#3f2f24"
+    ).pack(anchor="w", padx=15, pady=(12, 8))
 
     recent_text = "\n\n".join(
         f"{note[0]}\nReference: {note[1]}\nDate: {note[2]}"
@@ -1115,17 +1452,41 @@ def show_dashboard():
     if not recent_text:
         recent_text = "No study notes yet."
 
-    ttk.Label(
-        window,
-        text=recent_text,
-        justify="left"
-    ).pack(anchor="w", padx=40)
+    recent_box = tk.Text(
+        recent_panel,
+        wrap="word",
+        height=10,
+        font=("TkDefaultFont", 10),
+        bg="white",
+        fg="#3f2f24",
+        bd=0,
+        highlightthickness=0
+    )
+    recent_box.pack(
+        fill="both",
+        expand=True,
+        padx=15,
+        pady=(0, 15)
+    )
+    recent_box.insert("1.0", recent_text)
+    recent_box.configure(state="disabled")
 
-    ttk.Button(
+    # Close button
+    tk.Button(
         window,
-        text="Close",
-        command=window.destroy
-    ).pack(pady=25)
+        text="Close Dashboard",
+        command=window.destroy,
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#3f2f24",
+        fg="white",
+        activebackground="#5a4333",
+        activeforeground="white",
+        padx=25,
+        pady=8,
+        relief="flat",
+        cursor="hand2"
+    ).pack(pady=(0, 20))
+
 
 def show_topics():
     import sqlite3
@@ -1134,15 +1495,25 @@ def show_topics():
     window = tk.Toplevel()
     window.title("Topics")
     window.geometry("700x600")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="BIBLE STUDY TOPICS",
-        font=("TkDefaultFont", 20, "bold")
-    ).pack(pady=20)
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
 
     list_frame = ttk.Frame(window)
-    list_frame.pack(fill="both", expand=True, padx=30, pady=10)
+    list_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
     scrollbar = ttk.Scrollbar(list_frame)
     scrollbar.pack(side="right", fill="y")
@@ -1150,7 +1521,7 @@ def show_topics():
     topic_list = tk.Listbox(
         list_frame,
         width=80,
-        height=15,
+        height=20,
         yscrollcommand=scrollbar.set
     )
     topic_list.pack(side="left", fill="both", expand=True)
@@ -1191,6 +1562,110 @@ def show_topics():
 
     topics = load_topics()
 
+    def add_topic():
+        add_window = tk.Toplevel(window)
+        add_window.title("Add Topic")
+        add_window.geometry("650x450")
+        add_window.configure(bg="#f4f1ea")
+
+        header = tk.Frame(
+            add_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
+            text="ADD TOPIC",
+            font=("TkDefaultFont", 18, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
+        ).pack(pady=15)
+
+        form = ttk.Frame(add_window)
+        form.pack(fill="both", expand=True, padx=30, pady=10)
+
+        ttk.Label(
+            form,
+            text="Topic Name:"
+        ).grid(row=0, column=0, sticky="w", pady=10)
+
+        name_entry = ttk.Entry(form, width=50)
+        name_entry.grid(row=0, column=1, sticky="ew", pady=10)
+
+        ttk.Label(
+            form,
+            text="Description:"
+        ).grid(row=1, column=0, sticky="nw", pady=10)
+
+        description_text = tk.Text(
+            form,
+            width=50,
+            height=8
+        )
+        description_text.grid(
+            row=1,
+            column=1,
+            sticky="nsew",
+            pady=10
+        )
+
+        form.columnconfigure(1, weight=1)
+        form.rowconfigure(1, weight=1)
+
+        def save_new_topic():
+            name = name_entry.get().strip()
+            description = description_text.get(
+                "1.0",
+                tk.END
+            ).strip()
+
+            if not name:
+                messagebox.showwarning(
+                    "Missing Topic Name",
+                    "Please enter a topic name."
+                )
+                return
+
+            conn = sqlite3.connect(
+                "/home/tim/BibleStudy/bible_study.db"
+            )
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO topics (name, description)
+                VALUES (?, ?)
+                """,
+                (name, description)
+            )
+
+            conn.commit()
+            conn.close()
+
+            messagebox.showinfo(
+                "Topic Added",
+                "Topic added successfully."
+            )
+
+            add_window.destroy()
+            topics[:] = load_topics()
+
+        button_frame = ttk.Frame(add_window)
+        button_frame.pack(pady=15)
+
+        ttk.Button(
+            button_frame,
+            text="Save Topic",
+            command=save_new_topic
+        ).pack(side="left", padx=10)
+
+        ttk.Button(
+            button_frame,
+            text="Cancel",
+            command=add_window.destroy
+        ).pack(side="left", padx=10)
+
     def edit_topic():
         selection = topic_list.curselection()
 
@@ -1205,12 +1680,21 @@ def show_topics():
 
         edit_window = tk.Toplevel(window)
         edit_window.title("Edit Topic")
-        edit_window.geometry("600x350")
+        edit_window.geometry("650x450")
+        edit_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             edit_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
             text="EDIT TOPIC",
-            font=("TkDefaultFont", 18, "bold")
+            font=("TkDefaultFont", 18, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         form = ttk.Frame(edit_window)
@@ -1408,6 +1892,12 @@ def show_topics():
 
     ttk.Button(
         button_frame,
+        text="Add Topic",
+        command=add_topic
+    ).pack(side="left", padx=5)
+
+    ttk.Button(
+        button_frame,
         text="Edit Topic",
         command=edit_topic
     ).pack(side="left", padx=5)
@@ -1430,16 +1920,26 @@ def show_cross_references():
 
     window = tk.Toplevel()
     window.title("Cross References")
-    window.geometry("750x600")
+    window.geometry("700x600")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="BIBLE CROSS REFERENCES",
-        font=("TkDefaultFont", 20, "bold")
-    ).pack(pady=20)
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
 
     list_frame = ttk.Frame(window)
-    list_frame.pack(fill="both", expand=True, padx=25, pady=10)
+    list_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
     reference_list = tk.Listbox(
         list_frame,
@@ -1524,12 +2024,21 @@ def show_cross_references():
 
         edit_window = tk.Toplevel(window)
         edit_window.title("Edit Cross Reference")
-        edit_window.geometry("650x400")
+        edit_window.geometry("650x450")
+        edit_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             edit_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
             text="EDIT CROSS REFERENCE",
-            font=("TkDefaultFont", 18, "bold")
+            font=("TkDefaultFont", 18, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         form = ttk.Frame(edit_window)
@@ -1756,16 +2265,26 @@ def show_sermon_notes():
 
     window = tk.Toplevel()
     window.title("Sermon Notes")
-    window.geometry("750x650")
+    window.geometry("700x600")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="SERMON NOTES",
-        font=("TkDefaultFont", 20, "bold")
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
     ).pack(pady=15)
 
     form = ttk.Frame(window)
-    form.pack(fill="x", padx=30)
+    form.pack(fill="both", expand=True, padx=30, pady=5)
 
     ttk.Label(form,text="Sermon Title:").grid(
         row=0, column=0, sticky="w", pady=5
@@ -1785,7 +2304,7 @@ def show_sermon_notes():
         row=2, column=0, sticky="nw", pady=5
     )
 
-    content_text = tk.Text(form, width=70, height=20, wrap="word")
+    content_text = tk.Text(form, width=70, height=24, wrap="word")
     content_text.grid(row=2, column=1, sticky="nsew", pady=5)
 
     form.columnconfigure(1, weight=1)
@@ -1858,7 +2377,23 @@ def view_sermon_notes():
 
     window = tk.Toplevel()
     window.title("Saved Sermon Notes")
+    window.configure(bg="#f4f1ea")
+
+    header = tk.Frame(
+        window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
+        text="SAVED SERMON NOTES",
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
     window.geometry("850x650")
+    window.attributes("-zoomed", True)
 
     ttk.Label(
         window,
@@ -1916,12 +2451,21 @@ def view_sermon_notes():
 
         edit_window = tk.Toplevel(window)
         edit_window.title("Edit Sermon")
-        edit_window.geometry("750x600")
+        edit_window.geometry("650x450")
+        edit_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             edit_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
             text="EDIT SERMON",
-            font=("TkDefaultFont", 20, "bold")
+            font=("TkDefaultFont", 20, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         form = ttk.Frame(edit_window)
@@ -2035,16 +2579,25 @@ def add_cross_reference():
 
     window = tk.Toplevel()
     window.title("Add Cross Reference")
-    window.geometry("700x500")
+    window.geometry("650x450")
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="ADD CROSS REFERENCE",
-        font=("TkDefaultFont", 20, "bold")
-    ).pack(pady=20)
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
 
     form = ttk.Frame(window)
-    form.pack(fill="x", padx=30)
+    form.pack(fill="both", expand=True, padx=30, pady=5)
 
     ttk.Label(
         form,
@@ -2131,6 +2684,574 @@ def add_cross_reference():
         text="Close",
         command=window.destroy
     ).pack(side="left", padx=10)
+
+def create_calendar_reminders_table():
+    conn = sqlite3.connect("/home/tim/BibleStudy/bible_study.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reminder_date TEXT NOT NULL,
+            title TEXT NOT NULL,
+            details TEXT
+        )
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+create_calendar_reminders_table()
+
+
+def show_calendar(parent):
+    from datetime import date
+
+    calendar_window = tk.Toplevel(parent)
+    calendar_window.title("Bible Study Calendar")
+    calendar_window.geometry("650x450")
+    calendar_window.minsize(380, 400)
+    calendar_window.configure(bg="#f4f1ea")
+
+    current_date = date.today()
+    current_month = current_date.month
+    current_year = current_date.year
+
+    header = tk.Frame(
+        calendar_window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    title_label = tk.Label(
+        header,
+        text="📅 Bible Study Calendar",
+        font=("TkDefaultFont", 18, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    )
+    title_label.pack(pady=15)
+
+    month_frame = tk.Frame(
+        calendar_window,
+        bg="#f4f1ea"
+    )
+    month_frame.pack(fill="x", padx=20, pady=15)
+
+    calendar_display = tk.Frame(
+        calendar_window,
+        bg="white",
+        bd=1,
+        relief="solid"
+    )
+    calendar_display.pack(
+        fill="both",
+        expand=True,
+        padx=20,
+        pady=(0, 20)
+    )
+
+    def show_reminders(selected_date):
+        from tkinter import messagebox
+        from datetime import datetime
+
+        conn = sqlite3.connect(
+            "/home/tim/BibleStudy/bible_study.db"
+        )
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, title, details
+            FROM calendar_reminders
+            WHERE reminder_date = ?
+            ORDER BY id
+            """,
+            (selected_date,)
+        )
+
+        reminders = cursor.fetchall()
+        conn.close()
+
+        if not reminders:
+            messagebox.showinfo(
+                "Calendar",
+                "There are no reminders for this date."
+            )
+            return
+
+        reminder_window = tk.Toplevel(calendar_window)
+        reminder_window.title("Calendar Reminders")
+        reminder_window.geometry("650x450")
+        reminder_window.configure(bg="#f4f1ea")
+
+        header = tk.Frame(
+            reminder_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        display_date = datetime.strptime(
+            selected_date,
+            "%Y-%m-%d"
+        ).strftime("%B %d, %Y")
+
+        tk.Label(
+            header,
+            text=f"🔔 Reminders — {display_date}",
+            font=("TkDefaultFont", 18, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
+        ).pack(pady=15)
+
+        content = tk.Frame(
+            reminder_window,
+            bg="#f4f1ea"
+        )
+        content.pack(
+            fill="both",
+            expand=True,
+            padx=25,
+            pady=20
+        )
+
+        reminder_text = tk.Text(
+            content,
+            wrap="word",
+            font=("TkDefaultFont", 11),
+            bg="white",
+            fg="#3f2f24",
+            relief="solid",
+            bd=1
+        )
+        reminder_text.pack(
+            fill="both",
+            expand=True
+        )
+
+        for index, (reminder_id, title, details) in enumerate(reminders, start=1):
+            reminder_text.insert(
+                tk.END,
+                f"{index}. {title}\n",
+                "title"
+            )
+
+            if details:
+                reminder_text.insert(
+                    tk.END,
+                    f"{details}\n"
+                )
+
+            reminder_text.insert(
+                tk.END,
+                "\n"
+            )
+
+        reminder_text.tag_configure(
+            "title",
+            font=("TkDefaultFont", 12, "bold"),
+            foreground="#3f2f24"
+        )
+
+        reminder_text.configure(state="disabled")
+
+        tk.Button(
+            reminder_window,
+            text="Close",
+            command=reminder_window.destroy,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#3f2f24",
+            fg="white",
+            activebackground="#5a4434",
+            activeforeground="white",
+            width=18,
+            height=2,
+            relief="flat",
+            cursor="hand2"
+        ).pack(pady=(0, 20))
+
+    def add_reminder():
+        from datetime import date, datetime
+        from tkinter import messagebox
+
+        reminder_window = tk.Toplevel(calendar_window)
+        reminder_window.title("Add Calendar Reminder")
+        reminder_window.geometry("650x450")
+        reminder_window.configure(bg="#f4f1ea")
+
+        header = tk.Frame(
+            reminder_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
+            text="➕ ADD CALENDAR REMINDER",
+            font=("TkDefaultFont", 18, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
+        ).pack(pady=15)
+
+        form = tk.Frame(
+            reminder_window,
+            bg="#f4f1ea"
+        )
+        form.pack(
+            fill="both",
+            expand=True,
+            padx=30,
+            pady=20
+        )
+
+        tk.Label(
+            form,
+            text="Date (MM/DD/YYYY):",
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24"
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            pady=10
+        )
+
+        date_entry = tk.Entry(
+            form,
+            width=30,
+            font=("TkDefaultFont", 10)
+        )
+        date_entry.grid(
+            row=0,
+            column=1,
+            sticky="w",
+            pady=10
+        )
+        date_entry.insert(
+            0,
+            date.today().strftime("%m/%d/%Y")
+        )
+
+        tk.Label(
+            form,
+            text="Reminder Title:",
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24"
+        ).grid(
+            row=1,
+            column=0,
+            sticky="w",
+            pady=10
+        )
+
+        title_entry = tk.Entry(
+            form,
+            width=45,
+            font=("TkDefaultFont", 10)
+        )
+        title_entry.grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            pady=10
+        )
+
+        tk.Label(
+            form,
+            text="Details:",
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24"
+        ).grid(
+            row=2,
+            column=0,
+            sticky="nw",
+            pady=10
+        )
+
+        details_text = tk.Text(
+            form,
+            width=45,
+            height=8,
+            font=("TkDefaultFont", 10)
+        )
+        details_text.grid(
+            row=2,
+            column=1,
+            sticky="nsew",
+            pady=10
+        )
+
+        form.columnconfigure(1, weight=1)
+        form.rowconfigure(2, weight=1)
+
+        def save_reminder():
+            entered_date = date_entry.get().strip()
+            title = title_entry.get().strip()
+            details = details_text.get(
+                "1.0",
+                tk.END
+            ).strip()
+
+            try:
+                selected_date = datetime.strptime(
+                    entered_date,
+                    "%m/%d/%Y"
+                ).date()
+                reminder_date = selected_date.strftime("%Y-%m-%d")
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Date",
+                    "Please enter the date in MM/DD/YYYY format."
+                )
+                return
+
+            if not title:
+                messagebox.showwarning(
+                    "Missing Reminder Title",
+                    "Please enter a reminder title."
+                )
+                return
+
+            conn = sqlite3.connect(
+                "/home/tim/BibleStudy/bible_study.db"
+            )
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO calendar_reminders
+                (reminder_date, title, details)
+                VALUES (?, ?, ?)
+                """,
+                (reminder_date, title, details)
+            )
+
+            conn.commit()
+            conn.close()
+
+            messagebox.showinfo(
+                "Reminder Saved",
+                "Calendar reminder saved successfully."
+            )
+
+            reminder_window.destroy()
+            draw_calendar()
+
+        button_frame = tk.Frame(
+            reminder_window,
+            bg="#f4f1ea"
+        )
+        button_frame.pack(pady=(0, 20))
+
+        tk.Button(
+            button_frame,
+            text="Save Reminder",
+            command=save_reminder,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#3f2f24",
+            fg="white",
+            activebackground="#5a4434",
+            activeforeground="white",
+            width=18,
+            height=2,
+            relief="flat",
+            cursor="hand2"
+        ).pack(
+            side="left",
+            padx=10
+        )
+
+        tk.Button(
+            button_frame,
+            text="Cancel",
+            command=reminder_window.destroy,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#e8d8bd",
+            fg="#3f2f24",
+            activebackground="#c9b89f",
+            activeforeground="#3f2f24",
+            width=18,
+            height=2,
+            relief="flat",
+            cursor="hand2"
+        ).pack(
+            side="left",
+            padx=10
+        )
+
+    def draw_calendar():
+        for widget in month_frame.winfo_children():
+            widget.destroy()
+
+        for widget in calendar_display.winfo_children():
+            widget.destroy()
+
+        month_name = calendar.month_name[current_month]
+
+        tk.Button(
+            month_frame,
+            text="◀",
+            command=previous_month,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#e8d8bd",
+            fg="#3f2f24",
+            relief="flat",
+            width=4
+        ).pack(side="left")
+
+        tk.Label(
+            month_frame,
+            text=f"{month_name} {current_year}",
+            font=("TkDefaultFont", 14, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24"
+        ).pack(side="left", expand=True)
+
+        tk.Button(
+            month_frame,
+            text="▶",
+            command=next_month,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#e8d8bd",
+            fg="#3f2f24",
+            relief="flat",
+            width=4
+        ).pack(side="right")
+
+        tk.Button(
+            calendar_window,
+            text="➕ Add Reminder",
+            command=add_reminder,
+            font=("TkDefaultFont", 9, "bold"),
+            bg="#d9e6d2",
+            fg="#3f2f24",
+            relief="flat",
+            cursor="hand2"
+        ).pack(pady=(0, 10))
+
+        days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+        for column, day in enumerate(days):
+            tk.Label(
+                calendar_display,
+                text=day,
+                font=("TkDefaultFont", 9, "bold"),
+                bg="#d9e6d2",
+                fg="#3f2f24",
+                width=8,
+                pady=10
+            ).grid(
+                row=0,
+                column=column,
+                sticky="nsew"
+            )
+
+        month_days = calendar.monthcalendar(
+            current_year,
+            current_month
+        )
+
+        for row, week in enumerate(month_days, start=1):
+            for column, day in enumerate(week):
+                if day == 0:
+                    continue
+
+                is_today = (
+                    day == current_date.day
+                    and current_month == current_date.month
+                    and current_year == current_date.year
+                )
+
+                if is_today:
+                    bg = "#e8d8bd"
+                    font = ("TkDefaultFont", 10, "bold")
+                else:
+                    bg = "white"
+                    font = ("TkDefaultFont", 10)
+
+                day_date = f"{current_year:04d}-{current_month:02d}-{day:02d}"
+
+                conn = sqlite3.connect(
+                    "/home/tim/BibleStudy/bible_study.db"
+                )
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM calendar_reminders
+                    WHERE reminder_date = ?
+                    """,
+                    (day_date,)
+                )
+
+                reminder_count = cursor.fetchone()[0]
+                conn.close()
+
+                day_text = str(day)
+
+                if reminder_count > 0:
+                    day_text += " 🔔"
+
+                tk.Button(
+                    calendar_display,
+                    text=day_text,
+                    font=font,
+                    bg=bg,
+                    fg="#3f2f24",
+                    activebackground="#d9e6d2",
+                    activeforeground="#3f2f24",
+                    width=8,
+                    pady=8,
+                    relief="flat",
+                    cursor="hand2",
+                    command=lambda selected_date=day_date: show_reminders(
+                        selected_date
+                    )
+                ).grid(
+                    row=row,
+                    column=column,
+                    sticky="nsew",
+                    padx=1,
+                    pady=1
+                )
+
+        for column in range(7):
+            calendar_display.columnconfigure(
+                column,
+                weight=1
+            )
+
+    def previous_month():
+        nonlocal current_month, current_year
+
+        current_month -= 1
+
+        if current_month == 0:
+            current_month = 12
+            current_year -= 1
+
+        draw_calendar()
+
+    def next_month():
+        nonlocal current_month, current_year
+
+        current_month += 1
+
+        if current_month == 13:
+            current_month = 1
+            current_year += 1
+
+        draw_calendar()
+
+    draw_calendar()
+
 
 def get_verse_of_day():
     import urllib.parse
@@ -2540,7 +3661,24 @@ def personal_bible_study():
 
     window = tk.Toplevel()
     window.title("Personal Bible Study")
-    window.geometry("850x700")
+    window.geometry("900x700")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
+
+    header = tk.Frame(
+        window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
+        text="PERSONAL BIBLE STUDY",
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
+    window.geometry("700x600")
 
     ttk.Label(
         window,
@@ -2662,11 +3800,21 @@ def view_personal_studies():
     window = tk.Toplevel()
     window.title("Personal Bible Studies")
     window.geometry("900x700")
+    window.attributes("-zoomed", True)
+    window.configure(bg="#f4f1ea")
 
-    ttk.Label(
+    header = tk.Frame(
         window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
         text="PERSONAL BIBLE STUDIES",
-        font=("TkDefaultFont", 20, "bold")
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
     ).pack(pady=15)
 
     search_frame = ttk.LabelFrame(
@@ -2789,12 +3937,21 @@ def view_personal_studies():
 
         edit_window = tk.Toplevel(window)
         edit_window.title("Edit Personal Bible Study")
-        edit_window.geometry("800x650")
+        edit_window.geometry("650x450")
+        edit_window.configure(bg="#f4f1ea")
 
-        ttk.Label(
+        header = tk.Frame(
             edit_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
             text="EDIT PERSONAL BIBLE STUDY",
-            font=("TkDefaultFont", 20, "bold")
+            font=("TkDefaultFont", 20, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
         ).pack(pady=15)
 
         form = ttk.Frame(edit_window)
@@ -2954,53 +4111,116 @@ def view_personal_studies():
         command=window.destroy
     ).pack(side="left", padx=10)
 
+def create_prayer_table():
+    conn = sqlite3.connect("/home/tim/BibleStudy/bible_study.db")
+    cursor = conn.cursor()
+    cursor.execute("""CREATE TABLE IF NOT EXISTS prayers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        prayer TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    conn.commit()
+    conn.close()
+
 def main():
     from datetime import date
+    create_prayer_table()
 
     root = tk.Tk()
+    root.attributes("-zoomed", True)
     root.title("Bible Study")
-    root.geometry("900x600")
-    root.minsize(700, 500)
+    root.geometry("950x700")
+    root.minsize(800, 600)
+    root.configure(bg="#f4f1ea")
 
-    title = ttk.Label(
+    # Header
+    header = tk.Frame(
         root,
-        text="Bible Study",
-        font=("TkDefaultFont", 24, "bold")
+        bg="#3f2f24",
+        height=125
     )
-    title.pack(pady=(25, 5))
+    header.pack(fill="x")
+    header.pack_propagate(False)
 
-    subtitle = ttk.Label(
+    tk.Label(
+        header,
+        text="📖  BIBLE STUDY",
+        font=("TkDefaultFont", 28, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=(22, 2))
+
+    tk.Label(
+        header,
+        text="Study Scripture • Grow in Faith • Keep Learning",
+        font=("TkDefaultFont", 11),
+        bg="#3f2f24",
+        fg="#e8d8bd"
+    ).pack()
+
+    # Main content
+    content = tk.Frame(
         root,
-        text="Study Dashboard",
-        font=("TkDefaultFont", 12)
+        bg="#f4f1ea"
     )
-    subtitle.pack(pady=(0, 25))
+    content.pack(
+        fill="both",
+        expand=True,
+        padx=35,
+        pady=20
+    )
 
+    tk.Label(
+        content,
+        text="Welcome to Your Bible Study",
+        font=("TkDefaultFont", 19, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(pady=(0, 15))
+
+    # Verse of the Day
     verse_reference, verse_text = get_verse_of_day()
 
-    verse_frame = ttk.LabelFrame(
-        root,
-        text="Verse of the Day"
+    verse_frame = tk.Frame(
+        content,
+        bg="white",
+        bd=1,
+        relief="solid"
     )
     verse_frame.pack(
         fill="x",
-        padx=40,
         pady=(0, 20)
     )
 
-    verse_label = ttk.Label(
+    tk.Label(
+        verse_frame,
+        text="VERSE OF THE DAY",
+        font=("TkDefaultFont", 11, "bold"),
+        bg="white",
+        fg="#7a5c3e"
+    ).pack(pady=(15, 5))
+
+    verse_label = tk.Label(
         verse_frame,
         text=verse_text,
-        wraplength=800,
+        wraplength=820,
         justify="center",
-        font=("TkDefaultFont", 12)
+        font=("TkDefaultFont", 13),
+        bg="white",
+        fg="#3f2f24"
     )
-    verse_label.pack(padx=20, pady=(15, 5))
+    verse_label.pack(
+        padx=25,
+        pady=(5, 8)
+    )
 
-    reference_label = ttk.Label(
+    reference_label = tk.Label(
         verse_frame,
         text=verse_reference,
-        font=("TkDefaultFont", 11, "bold")
+        font=("TkDefaultFont", 11, "bold"),
+        bg="white",
+        fg="#7a5c3e"
     )
     reference_label.pack(pady=(0, 15))
 
@@ -3023,57 +4243,256 @@ def main():
 
     root.after(60000, update_verse_of_day)
 
-    button_frame = ttk.Frame(root)
-    button_frame.pack(pady=10)
+    # Lower section
+    lower_frame = tk.Frame(
+        content,
+        bg="#f4f1ea"
+    )
+    lower_frame.pack(
+        fill="x",
+        pady=(0, 5)
+    )
+    lower_frame.configure(height=350)
+    lower_frame.pack_propagate(False)
 
-    ttk.Button(
-        button_frame,
-        text="Read Bible",
-        width=25,
-        command=show_bible_reader
-    ).grid(row=0, column=1, padx=10, pady=10)
+    lower_frame.columnconfigure(0, weight=1)
+    lower_frame.columnconfigure(1, weight=1)
 
-    ttk.Button(
-    button_frame,
-    text="Study Dashboard",
-    width=25,
-    command=show_dashboard
-    ).grid(row=0, column=0, padx=10, pady=10)
+    # Prayer
+    prayer_frame = tk.Frame(
+        lower_frame,
+        bg="#e2ddd4",
+        bd=1,
+        relief="solid",
+        width=700,
+        height=550
+    )
+    prayer_frame.grid(row=0, column=0, padx=(0, 10), pady=5, sticky="nw")
+    prayer_frame.grid_propagate(False)
 
-    ttk.Button(
-        button_frame,
-        text="Topics",
-        width=25,
-        command=show_topics
-    ).grid(row=1, column=0, padx=10, pady=10)
+    tk.Label(
+        prayer_frame,
+        text="Prayer",
+        font=("TkDefaultFont", 15, "bold"),
+        bg="#e2ddd4",
+        fg="#3f2f24"
+    ).pack(pady=(12, 8))
 
-    ttk.Button(
-        button_frame,
-        text="Cross References",
-        width=25,
-        command=show_cross_references
-    ).grid(row=2, column=0, padx=10, pady=10)
+    prayer_button_frame = tk.Frame(
+        prayer_frame,
+        bg="#e2ddd4"
+    )
+    prayer_button_frame.pack(pady=(0, 8))
 
-    ttk.Button(
-        button_frame,
-        text="Sermon Notes",
-        width=25,
-        command=show_sermon_notes
-    ).grid(row=1, column=1, padx=10, pady=10)
+    for text in ("New", "Search", "Delete"):
+        tk.Button(
+            prayer_button_frame,
+            text=text,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24",
+            width=8
+        ).pack(side="left", padx=3)
 
-    ttk.Button(
-        button_frame,
-        text="Personal Bible Study",
-        width=25,
-        command=personal_bible_study
-    ).grid(row=2, column=1, padx=10, pady=10)
+    prayer_list = tk.Listbox(
+        prayer_frame,
+        font=("TkDefaultFont", 10),
+        bg="white",
+        fg="#3f2f24",
+        height=10,
+        width=32
+    )
+    prayer_list.pack(fill="both", expand=True, padx=12, pady=(2, 12))
 
-    ttk.Button(
-        root,
+    # Bible Study Tools
+    tools_frame = tk.Frame(
+        lower_frame,
+        bg="#f4f1ea"
+    )
+    tools_frame.pack(anchor="center")
+
+    tk.Label(
+        tools_frame,
+        text="Bible Study Tools",
+        font=("TkDefaultFont", 15, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(pady=(0, 8))
+
+    button_frame = tk.Frame(
+        tools_frame,
+        bg="#f4f1ea"
+    )
+    button_frame.pack()
+
+    buttons = [
+        ("📖  Read Bible", show_bible_reader, "#d7e3ef"),
+        ("📊  Study Dashboard", show_dashboard, "#e8d8bd"),
+        ("📚  Topics", show_topics, "#d9e6d2"),
+        ("🔗  Cross References", show_cross_references, "#ead8e8"),
+        ("📝  Sermon Notes", show_sermon_notes, "#f0dfc0"),
+        ("✍  Personal Bible Study", personal_bible_study, "#e2ddd4")
+    ]
+
+    for index, (text_label, command, button_bg) in enumerate(buttons):
+        row = index // 2
+        column = index % 2
+
+        button = tk.Button(
+            button_frame,
+            text=text_label,
+            command=command,
+            font=("TkDefaultFont", 11, "bold"),
+            bg=button_bg,
+            fg="#3f2f24",
+            activebackground="#c9b89f",
+            activeforeground="#3f2f24",
+            width=30,
+            height=2,
+            relief="solid",
+            bd=1,
+            cursor="hand2"
+        )
+        button.grid(
+            row=row,
+            column=column,
+            padx=8,
+            pady=6
+        )
+
+    # Calendar preview
+    calendar_frame = tk.Frame(
+        lower_frame,
+        bg="white",
+        bd=2,
+        relief="solid",
+        width=350,
+        height=300
+    )
+    calendar_frame.pack_propagate(False)
+    calendar_frame.place(
+        relx=1.0,
+        y=15,
+        anchor="ne"
+    )
+
+    tk.Label(
+        calendar_frame,
+        text="📅  Calendar",
+        font=("TkDefaultFont", 14, "bold"),
+        bg="white",
+        fg="#3f2f24"
+    ).pack(pady=(12, 5))
+
+    calendar_preview = tk.Frame(
+        calendar_frame,
+        bg="white"
+    )
+    calendar_preview.pack(
+        fill="both",
+        expand=True,
+        padx=10,
+        pady=(0, 10)
+    )
+
+    today = date.today()
+    month_name = calendar.month_name[today.month]
+
+    tk.Label(
+        calendar_preview,
+        text=f"{month_name} {today.year}",
+        font=("TkDefaultFont", 11, "bold"),
+        bg="white",
+        fg="#7a5c3e"
+    ).pack(pady=(0, 5))
+
+    days = ["S", "M", "T", "W", "T", "F", "S"]
+
+    week_frame = tk.Frame(
+        calendar_preview,
+        bg="white"
+    )
+    week_frame.pack()
+
+    for day_name in days:
+        tk.Label(
+            week_frame,
+            text=day_name,
+            font=("TkDefaultFont", 8, "bold"),
+            bg="#d9e6d2",
+            fg="#3f2f24",
+            width=5
+        ).pack(side="left", padx=2)
+
+    for week in calendar.monthcalendar(today.year, today.month):
+        week_frame = tk.Frame(
+            calendar_preview,
+            bg="white"
+        )
+        week_frame.pack()
+
+        for day in week:
+            if day == 0:
+                text_value = ""
+                bg_value = "white"
+            elif day == today.day:
+                text_value = str(day)
+                bg_value = "#e8d8bd"
+            else:
+                text_value = str(day)
+                bg_value = "white"
+
+            tk.Label(
+                week_frame,
+                text=text_value,
+                font=("TkDefaultFont", 8, "bold" if day == today.day else "normal"),
+                bg=bg_value,
+                fg="#3f2f24",
+                width=5
+            ).pack(side="left", padx=2, pady=2)
+
+    tk.Button(
+        calendar_frame,
+        text="Open Calendar",
+        command=lambda: show_calendar(root),
+        font=("TkDefaultFont", 9, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        relief="flat",
+        cursor="hand2"
+    ).pack(pady=(0, 12))
+
+    # Bible Hub button
+    tk.Button(
+        content,
+        text="Bible Hub",
+        command=lambda: __import__("webbrowser").open("https://biblehub.com/"),
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        width=18,
+        height=2,
+        relief="flat",
+        cursor="hand2"
+    ).pack(pady=(15, 0))
+
+    # Exit button
+    tk.Button(
+        content,
         text="Exit",
         command=root.destroy,
-        width=20
-    ).pack(pady=30)
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#3f2f24",
+        fg="white",
+        activebackground="#5a4434",
+        activeforeground="white",
+        width=18,
+        height=2,
+        relief="flat",
+        cursor="hand2"
+    ).pack(pady=(15, 0))
 
     root.mainloop()
 
