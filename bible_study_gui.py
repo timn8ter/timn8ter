@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox, simpledialog
 import urllib.request
 import json
 import re
@@ -13,6 +13,219 @@ HEADER_COLOR = "#3f2f24"
 HEADER_TEXT_COLOR = "#f5e6c8"
 SECONDARY_COLOR = "#e8d8bd"
 TEXT_COLOR = "#3f2f24"
+
+
+def hyperlink_ctrl_k(event):
+    widget = event.widget.focus_get() if hasattr(event.widget, "focus_get") else None
+    if widget is None:
+        widget = event.widget
+    if isinstance(widget, tk.Text):
+        return add_hyperlink_to_text(widget)
+    return None
+
+
+# Hyperlink support for editable text boxes
+def add_hyperlink_to_text(text_widget):
+    import webbrowser
+
+    try:
+        start_index = text_widget.index(tk.SEL_FIRST)
+        end_index = text_widget.index(tk.SEL_LAST)
+        selected_text = text_widget.get(start_index, end_index)
+    except tk.TclError:
+        messagebox.showinfo("Insert Link", "Please highlight the text you want to make into a link.")
+        return "break"
+
+    # Custom Insert Link dialog with right-click editing options
+    dialog = tk.Toplevel(text_widget.winfo_toplevel())
+    dialog.title("Insert Link")
+    dialog.geometry("500x180")
+    dialog.configure(bg="#f4f1ea")
+    dialog.transient(text_widget.winfo_toplevel())
+    dialog.grab_set()
+
+    tk.Label(
+        dialog,
+        text=f"Text: {selected_text}",
+        bg="#f4f1ea",
+        fg="#3f2f24",
+        font=("TkDefaultFont", 10, "bold"),
+        anchor="w"
+    ).pack(fill="x", padx=20, pady=(15, 5))
+
+    tk.Label(
+        dialog,
+        text="Enter URL:",
+        bg="#f4f1ea",
+        fg="#3f2f24",
+        anchor="w"
+    ).pack(fill="x", padx=20)
+
+    url_entry = tk.Entry(
+        dialog,
+        width=55
+    )
+    url_entry.pack(fill="x", padx=20, pady=5)
+    url_entry.focus_set()
+
+    # Right-click editing menu for URL field
+    url_menu = tk.Menu(url_entry, tearoff=0)
+    url_menu.add_command(
+        label="Cut",
+        command=lambda: url_entry.event_generate("<<Cut>>")
+    )
+    url_menu.add_command(
+        label="Copy",
+        command=lambda: url_entry.event_generate("<<Copy>>")
+    )
+    url_menu.add_command(
+        label="Paste",
+        command=lambda: url_entry.event_generate("<<Paste>>")
+    )
+    url_menu.add_separator()
+    url_menu.add_command(
+        label="Select All",
+        command=lambda: url_entry.select_range(0, tk.END)
+    )
+
+    def show_url_menu(event):
+        url_menu.tk_popup(event.x_root, event.y_root)
+
+    url_entry.bind("<Button-3>", show_url_menu)
+
+    result = {"url": None}
+
+    def insert_link():
+        result["url"] = url_entry.get().strip()
+        dialog.destroy()
+
+    def cancel_link():
+        dialog.destroy()
+
+    button_frame = tk.Frame(
+        dialog,
+        bg="#f4f1ea"
+    )
+    button_frame.pack(pady=10)
+
+    tk.Button(
+        button_frame,
+        text="Insert Link",
+        command=insert_link,
+        bg="#3f2f24",
+        fg="white",
+        relief="flat",
+        cursor="hand2"
+    ).pack(side="left", padx=5)
+
+    tk.Button(
+        button_frame,
+        text="Cancel",
+        command=cancel_link,
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        relief="flat",
+        cursor="hand2"
+    ).pack(side="left", padx=5)
+
+    dialog.wait_window()
+
+    url = result["url"]
+
+    if not url:
+        return "break"
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    tag_name = f"hyperlink_{id(text_widget)}_{len(text_widget.tag_names())}"
+    if not hasattr(text_widget, "_hyperlink_urls"):
+        text_widget._hyperlink_urls = {}
+    text_widget._hyperlink_urls[tag_name] = url
+
+    text_widget.tag_configure(
+        tag_name,
+        foreground="blue",
+        underline=True
+    )
+
+    text_widget.tag_add(tag_name, start_index, end_index)
+
+    text_widget.tag_bind(
+        tag_name,
+        "<Button-1>",
+        lambda event, link=url: webbrowser.open(link)
+    )
+
+
+def serialize_hyperlinks(text_widget):
+    import json
+
+    content = text_widget.get("1.0", tk.END).rstrip("\n")
+    links = []
+
+    for tag in text_widget.tag_names():
+        if tag.startswith("hyperlink_"):
+            ranges = text_widget.tag_ranges(tag)
+            if len(ranges) >= 2:
+                start = str(ranges[0])
+                end = str(ranges[1])
+                url = getattr(text_widget, "_hyperlink_urls", {}).get(tag)
+                if url:
+                    links.append({
+                        "start": start,
+                        "end": end,
+                        "url": url
+                    })
+
+    if not links:
+        return content
+
+    return json.dumps({
+        "text": content,
+        "links": links
+    })
+
+
+def restore_hyperlinks(text_widget, saved_content):
+    import json
+
+    try:
+        data = json.loads(saved_content)
+        if not isinstance(data, dict) or "text" not in data:
+            text_widget.insert("1.0", saved_content)
+            return
+    except (json.JSONDecodeError, TypeError):
+        text_widget.insert("1.0", saved_content)
+        return
+
+    text_widget.insert("1.0", data["text"])
+    text_widget._hyperlink_urls = {}
+
+    import webbrowser
+
+    for index, link in enumerate(data.get("links", [])):
+        text_widget.tag_configure(
+            tag_name,
+            foreground="blue",
+            underline=True
+        )
+        text_widget.tag_add(
+            tag_name,
+            link["start"],
+            link["end"]
+        )
+        text_widget._hyperlink_urls[tag_name] = link["url"]
+        text_widget.tag_bind(
+            tag_name,
+            "<Button-1>",
+            lambda event, url=link["url"]: webbrowser.open(url)
+        )
+
+    return "break"
+
+
+    return "break"
 
 
 def style_bible_window(window, title, height=15):
@@ -204,129 +417,7 @@ def get_openbible_cross_references(book, chapter, verse):
 
     return results
 
-COMMENTARY_API = "https://bible.helloao.org/api/c"
 
-
-COMMENTARIES = {
-    "Matthew Henry": "matthew-henry",
-    "Adam Clarke": "adam-clarke",
-    "John Gill": "john-gill",
-    "John Calvin": "john-calvin",
-    "Jamieson-Fausset-Brown": "jamieson-fausset-brown",
-    "Keil & Delitzsch": "keil-delitzsch",
-    "Tyndale": "tyndale"
-}
-
-
-COMMENTARY_BOOKS = {
-    "Genesis": "GEN", "Exodus": "EXO", "Leviticus": "LEV",
-    "Numbers": "NUM", "Deuteronomy": "DEU", "Joshua": "JOS",
-    "Judges": "JDG", "Ruth": "RUT", "1 Samuel": "1SA",
-    "2 Samuel": "2SA", "1 Kings": "1KI", "2 Kings": "2KI",
-    "1 Chronicles": "1CH", "2 Chronicles": "2CH",
-    "Ezra": "EZR", "Nehemiah": "NEH", "Esther": "EST",
-    "Job": "JOB", "Psalms": "PSA", "Psalm": "PSA",
-    "Proverbs": "PRO", "Ecclesiastes": "ECC",
-    "Song of Solomon": "SNG", "Isaiah": "ISA",
-    "Jeremiah": "JER", "Lamentations": "LAM",
-    "Ezekiel": "EZK", "Daniel": "DAN", "Hosea": "HOS",
-    "Joel": "JOL", "Amos": "AMO", "Obadiah": "OBA",
-    "Jonah": "JON", "Micah": "MIC", "Nahum": "NAM",
-    "Habakkuk": "HAB", "Zephaniah": "ZEP", "Haggai": "HAG",
-    "Zechariah": "ZEC", "Malachi": "MAL",
-    "Matthew": "MAT", "Mark": "MRK", "Luke": "LUK",
-    "John": "JHN", "Acts": "ACT", "Romans": "ROM",
-    "1 Corinthians": "1CO", "2 Corinthians": "2CO",
-    "Galatians": "GAL", "Ephesians": "EPH",
-    "Philippians": "PHP", "Colossians": "COL",
-    "1 Thessalonians": "1TH", "2 Thessalonians": "2TH",
-    "1 Timothy": "1TI", "2 Timothy": "2TI",
-    "Titus": "TIT", "Philemon": "PHM", "Hebrews": "HEB",
-    "James": "JAS", "1 Peter": "1PE", "2 Peter": "2PE",
-    "1 John": "1JN", "2 John": "2JN", "3 John": "3JN",
-    "Jude": "JUD", "Revelation": "REV"
-}
-
-def get_commentary_section(commentary_id, book, chapter, verse):
-    api_book = COMMENTARY_BOOKS.get(book)
-
-    if not api_book:
-        return {
-            "status": "book_mapping_missing",
-            "text": None
-        }
-
-    url = (
-        f"{COMMENTARY_API}/{commentary_id}/"
-        f"{api_book}/{chapter}.simple.json"
-    )
-
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            data = json.loads(response.read().decode("utf-8"))
-
-        sections = data.get("chapter", {}).get("content", [])
-
-        best_section = None
-
-        for section in sections:
-            try:
-                section_verse = int(section.get("number"))
-            except (TypeError, ValueError):
-                continue
-
-            if section_verse <= verse:
-                if (
-                    best_section is None
-                    or section_verse > best_section[0]
-                ):
-                    text = section.get("text", "")
-
-                    if isinstance(text, list):
-                        text = " ".join(
-                            str(item) for item in text
-                        )
-
-                    text = str(text).strip()
-
-                    if text:
-                        best_section = (
-                            section_verse,
-                            text
-                        )
-
-        if best_section:
-            return {
-                "status": "success",
-                "text": best_section[1]
-            }
-
-        return {
-            "status": "no_section",
-            "text": None
-        }
-
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return {
-                "status": "not_available",
-                "text": None
-            }
-
-        print("Commentary HTTP error:", e)
-
-        return {
-            "status": "error",
-            "text": None
-        }
-
-    except Exception as e:
-        print("Commentary error:", e)
-
-        return {
-            "status": "error",
-            "text": None
-        }
 
 def show_bible_reader():
     import urllib.parse
@@ -361,25 +452,44 @@ def show_bible_reader():
 
     ttk.Label(
         version_frame,
-        text="Bible Version:"
+        text="Bible Version:",
+        font=("TkDefaultFont", 11, "bold")
     ).pack(side="left")
 
     bible_version = ttk.Combobox(
         version_frame,
         values=["NET", "CSB", "ESV"],
         state="readonly",
-        width=12
+        width=12,
+        font=("TkDefaultFont", 11)
     )
     bible_version.set("NET")
     bible_version.pack(side="left", padx=10)
 
-    ttk.Label(
+    tk.Label(
         input_frame,
-        text="Bible passage:"
+        text="Enter Bible passage:",
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
     ).pack(side="left")
 
-    passage_entry = ttk.Entry(input_frame)
-    passage_entry.pack(side="left", fill="x", expand=True, padx=10)
+    passage_entry = tk.Entry(
+        input_frame,
+        font=("TkDefaultFont", 12),
+        bg="white",
+        fg="#3f2f24",
+        insertbackground="#3f2f24",
+        relief="solid",
+        bd=1
+    )
+    passage_entry.pack(
+        side="left",
+        fill="x",
+        expand=True,
+        padx=12,
+        ipady=6
+    )
 
     text_frame = ttk.Frame(window)
     text_frame.pack(fill="both", expand=True, padx=20, pady=15)
@@ -390,6 +500,7 @@ def show_bible_reader():
         font=("TkDefaultFont", 12)
     )
     text_box.pack(side="left", fill="both", expand=True)
+    text_box.bind("<Control-k>", hyperlink_ctrl_k)
 
     scrollbar = ttk.Scrollbar(
         text_frame,
@@ -614,10 +725,19 @@ def show_bible_reader():
                 f"Error: {error}"
             )
 
-    ttk.Button(
+    tk.Button(
         input_frame,
         text="Read",
-        command=load_passage
+        command=load_passage,
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        padx=12,
+        pady=5,
+        relief="flat",
+        cursor="hand2"
     ).pack(side="left", padx=5)
 
     passage_entry.bind(
@@ -625,58 +745,6 @@ def show_bible_reader():
         lambda event: load_passage()
     )
 
-    ttk.Button(
-        input_frame,
-        text="Constable's Notes",
-        command=lambda: show_constable_notes(passage_entry.get().strip())
-    ).pack(side="left", padx=5)
-
-    def open_commentaries():
-        commentary_window = tk.Toplevel(window)
-        commentary_window.title("Commentaries")
-        commentary_window.geometry("700x600")
-        commentary_window.attributes("-zoomed", True)
-        commentary_window.configure(bg="#f4f1ea")
-
-        header = tk.Frame(
-            commentary_window,
-            bg="#3f2f24"
-        )
-        header.pack(fill="x")
-
-        tk.Label(
-            header,
-            text="SELECT A COMMENTARY",
-            font=("TkDefaultFont", 20, "bold"),
-            bg="#3f2f24",
-            fg="#f5e6c8"
-        ).pack(pady=15)
-
-        commentary_options = [
-            ("Matthew Henry", "matthew-henry"),
-            ("Adam Clarke", "adam-clarke"),
-            ("John Gill", "john-gill"),
-            ("John Calvin", "john-calvin"),
-            ("Jamieson-Fausset-Brown", "jamieson-fausset-brown"),
-            ("Keil & Delitzsch", "keil-delitzsch"),
-            ("Tyndale", "tyndale")
-        ]
-
-        for name, commentary_id in commentary_options:
-            ttk.Button(
-                commentary_window,
-                text=name,
-                command=lambda cid=commentary_id: show_commentary(
-                    passage_entry.get().strip(),
-                    cid
-                )
-            ).pack(fill="x", padx=100, pady=5)
-
-    ttk.Button(
-        input_frame,
-        text="Commentaries",
-        command=open_commentaries
-    ).pack(side="left", padx=5)
 
     ttk.Button(
         window,
@@ -685,523 +753,269 @@ def show_bible_reader():
     ).pack(pady=(0, 15))
 
     passage_entry.focus()
-def show_commentary(passage, commentary_id):
-    passage = passage.strip()
+def delete_prayer(prayer_list, refresh_callback=None):
+    selection = prayer_list.curselection()
 
-    match = re.match(r"^(.*?)\s+(\d+):(\d+)", passage)
-
-    if not match:
-        messagebox.showerror(
-            "Invalid Passage",
-            "Please enter a passage such as Romans 8:1."
+    if not selection:
+        messagebox.showwarning(
+            "No Prayer Selected",
+            "Please select a prayer to delete."
         )
         return
 
-    book = match.group(1).strip()
-    chapter = int(match.group(2))
-    verse = int(match.group(3))
+    selected_title = prayer_list.get(selection[0])
 
-    if book not in COMMENTARY_BOOKS:
-        messagebox.showerror(
-            "Invalid Bible Book",
-            f"The Bible book '{book}' is not recognized."
-        )
+    confirm = messagebox.askyesno(
+        "Delete Prayer",
+        f"Are you sure you want to delete this prayer?\\n\\n{selected_title}"
+    )
+
+    if not confirm:
         return
 
-    commentary_names = {
-        "adam-clarke": "Adam Clarke Bible Commentary",
-        "matthew-henry": "Matthew Henry Bible Commentary",
-        "john-gill": "John Gill Bible Commentary",
-        "john-calvin": "John Calvin's Commentaries",
-        "jamieson-fausset-brown":
-            "Jamieson-Fausset-Brown Bible Commentary",
-        "keil-delitzsch":
-            "Keil & Delitzsch Old Testament Commentary",
-        "tyndale": "Tyndale Open Study Notes"
-    }
+    conn = sqlite3.connect(
+        "/home/tim/BibleStudy/bible_study.db"
+    )
+    cursor = conn.cursor()
 
-    commentary_name = commentary_names.get(
-        commentary_id,
-        commentary_id
+    cursor.execute(
+        "DELETE FROM prayers WHERE title = ?",
+        (selected_title,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    if refresh_callback:
+        refresh_callback()
+
+    messagebox.showinfo(
+        "Prayer Deleted",
+        "The prayer has been deleted."
     )
 
 
-    window = tk.Toplevel()
-    window.title(commentary_name)
-    window.geometry("700x600")
-    window.attributes("-zoomed", True)
-    window.configure(bg="#f4f1ea")
+def search_prayers():
+    search_window = tk.Toplevel()
+    search_window.title("Search Prayers")
+    search_window.geometry("650x500")
+    search_window.configure(bg="#f4f1ea")
 
     header = tk.Frame(
-        window,
+        search_window,
         bg="#3f2f24"
     )
     header.pack(fill="x")
 
     tk.Label(
         header,
-        text=commentary_name,
-        font=("TkDefaultFont", 18, "bold"),
-        bg="#3f2f24",
-        fg="#f5e6c8"
-    ).pack(pady=15)
-
-    tk.Label(
-        window,
-        text=f"Passage: {passage}",
-        font=("TkDefaultFont", 12),
-        bg="#f4f1ea",
-        fg="#3f2f24"
-    ).pack(pady=(10, 5))
-
-    text_box = tk.Text(
-        window,
-        wrap="word",
-        font=("TkDefaultFont", 11)
-    )
-    text_box.pack(
-        fill="both",
-        expand=True,
-        padx=20,
-        pady=10
-    )
-
-    scrollbar = ttk.Scrollbar(
-        window,
-        orient="vertical",
-        command=text_box.yview
-    )
-    scrollbar.pack(side="right", fill="y")
-
-    text_box.configure(yscrollcommand=scrollbar.set)
-
-    result = get_commentary_section(
-        commentary_id,
-        book,
-        chapter,
-        verse
-    )
-
-    status = result.get("status")
-    text = result.get("text")
-
-    if status == "success":
-        text_box.insert(tk.END, text)
-
-    elif status == "not_available":
-        text_box.insert(
-            tk.END,
-            f"{commentary_name} does not contain "
-            f"commentary for {book} {chapter}."
-        )
-
-    elif status == "book_mapping_missing":
-        text_box.insert(
-            tk.END,
-            f"The Bible book '{book}' is not currently "
-            f"mapped in the commentary system."
-        )
-
-    elif status == "no_section":
-        text_box.insert(
-            tk.END,
-            "No specific commentary section was found "
-            "for this verse."
-        )
-
-    else:
-        text_box.insert(
-            tk.END,
-            "Unable to retrieve commentary at this time."
-        )
-
-    text_box.configure(state="disabled")
-
-    def save_commentary():
-        commentary_text = text_box.get("1.0", tk.END).strip()
-
-        if not commentary_text:
-            return
-
-        save_window = tk.Toplevel(window)
-        save_window.title("Save Commentary")
-        save_window.geometry("650x450")
-        save_window.configure(bg="#f4f1ea")
-
-        header = tk.Frame(
-            save_window,
-            bg="#3f2f24"
-        )
-        header.pack(fill="x")
-
-        tk.Label(
-            header,
-            text="Save Commentary to Personal Bible Study",
-            font=("TkDefaultFont", 14, "bold"),
-            bg="#3f2f24",
-            fg="#f5e6c8"
-        ).pack(pady=15)
-
-        ttk.Label(
-            save_window,
-            text="Study Title:"
-        ).pack(anchor="w", padx=20)
-
-        title_entry = ttk.Entry(save_window, width=60)
-        title_entry.pack(fill="x", padx=20, pady=(0, 10))
-
-        ttk.Label(
-            save_window,
-            text="Study Notes:"
-        ).pack(anchor="w", padx=20)
-
-        notes_text = tk.Text(
-            save_window,
-            height=10,
-            wrap="word"
-        )
-        notes_text.pack(
-            fill="both",
-            expand=True,
-            padx=20,
-            pady=(0, 10)
-        )
-
-        notes_text.insert(tk.END, commentary_text)
-
-        def save_study():
-            title = title_entry.get().strip()
-            content = notes_text.get("1.0", tk.END).strip()
-
-            if not title or not content:
-                return
-
-            conn = sqlite3.connect("/home/tim/BibleStudy/bible_study.db")
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                INSERT INTO personal_studies
-                (title, reference, content, created_at)
-                VALUES (?, ?, ?, datetime('now'))
-                """,
-                (title, passage, content)
-            )
-
-            conn.commit()
-            conn.close()
-
-            save_window.destroy()
-
-        ttk.Button(
-            save_window,
-            text="Save Study",
-            command=save_study
-        ).pack(pady=10)
-
-    ttk.Button(
-        window,
-        text="Save to Personal Bible Study",
-        command=save_commentary
-    ).pack(pady=(5, 10))
-
-def show_constable_notes(passage):
-    import urllib.request
-    import subprocess
-    import tempfile
-    import os
-    import re
-    from tkinter import messagebox
-
-    if not passage:
-        messagebox.showwarning(
-            "Missing Passage",
-            "Please enter a Bible passage first."
-        )
-        return
-
-    book_map = {
-        "genesis": "genesis",
-        "exodus": "exodus",
-        "leviticus": "leviticus",
-        "numbers": "numbers",
-        "deuteronomy": "deuteronomy",
-        "joshua": "joshua",
-        "judges": "judges",
-        "ruth": "ruth",
-        "1 samuel": "1samuel",
-        "2 samuel": "2samuel",
-        "1 kings": "1kings",
-        "2 kings": "2kings",
-        "1 chronicles": "1chronicles",
-        "2 chronicles": "2chronicles",
-        "ezra": "ezra",
-        "nehemiah": "nehemiah",
-        "esther": "esther",
-        "job": "job",
-        "psalms": "psalms",
-        "psalm": "psalms",
-        "proverbs": "proverbs",
-        "ecclesiastes": "ecclesiastes",
-        "song of solomon": "songofsolomon",
-        "song of songs": "songofsolomon",
-        "isaiah": "isaiah",
-        "jeremiah": "jeremiah",
-        "lamentations": "lamentations",
-        "ezekiel": "ezekiel",
-        "daniel": "daniel",
-        "hosea": "hosea",
-        "joel": "joel",
-        "amos": "amos",
-        "obadiah": "obadiah",
-        "jonah": "jonah",
-        "micah": "micah",
-        "nahum": "nahum",
-        "habakkuk": "habakkuk",
-        "zephaniah": "zephaniah",
-        "haggai": "haggai",
-        "zechariah": "zechariah",
-        "malachi": "malachi",
-        "matthew": "matthew",
-        "mark": "mark",
-        "luke": "luke",
-        "john": "john",
-        "acts": "acts",
-        "romans": "romans",
-        "1 corinthians": "1corinthians",
-        "2 corinthians": "2corinthians",
-        "galatians": "galatians",
-        "ephesians": "ephesians",
-        "philippians": "philippians",
-        "colossians": "colossians",
-        "1 thessalonians": "1thessalonians",
-        "2 thessalonians": "2thessalonians",
-        "1 timothy": "1timothy",
-        "2 timothy": "2timothy",
-        "titus": "titus",
-        "philemon": "philemon",
-        "hebrews": "hebrews",
-        "james": "james",
-        "1 peter": "1peter",
-        "2 peter": "2peter",
-        "1 john": "1john",
-        "2 john": "2john",
-        "3 john": "3john",
-        "jude": "jude",
-        "revelation": "revelation"
-    }
-
-    book_pattern = "|".join(
-        re.escape(book) for book in sorted(book_map, key=len, reverse=True)
-    )
-
-    match = re.match(
-        rf"^\s*({book_pattern})\s+(\d+)(?::(\d+)(?:-(\d+))?)?\s*$",
-        passage,
-        re.IGNORECASE
-    )
-
-    if not match:
-        messagebox.showwarning(
-            "Invalid Passage",
-            "Please enter a Bible passage using a full book name.\n\n"
-            "Examples:\n"
-            "Romans 8:1-4\n"
-            "John 3:16\n"
-            "Matthew 5:1-12"
-        )
-        return
-
-    book_name = match.group(1).lower()
-    book = book_map[book_name]
-    chapter = int(match.group(2))
-    start_verse = int(match.group(3)) if match.group(3) else None
-    end_verse = int(match.group(4)) if match.group(4) else start_verse
-
-    pdf_url = f"https://soniclight.com/tcon/notes/pdf/{book}.pdf"
-
-    window = tk.Toplevel()
-    window.title("Constable's Notes")
-    window.geometry("900x700")
-    window.attributes("-zoomed", True)
-    window.configure(bg="#f4f1ea")
-
-    header = tk.Frame(
-        window,
-        bg="#3f2f24"
-    )
-    header.pack(fill="x")
-
-    tk.Label(
-        header,
-        text="CONSTABLE'S NOTES",
+        text="Search Prayers",
         font=("TkDefaultFont", 20, "bold"),
         bg="#3f2f24",
         fg="#f5e6c8"
     ).pack(pady=15)
 
+    form = tk.Frame(
+        search_window,
+        bg="#f4f1ea"
+    )
+    form.pack(fill="both", expand=True, padx=25, pady=20)
+
     tk.Label(
-        window,
-        text=f"Passage: {passage}",
-        font=("TkDefaultFont", 12),
+        form,
+        text="Search",
+        font=("TkDefaultFont", 11, "bold"),
         bg="#f4f1ea",
         fg="#3f2f24"
-    ).pack(pady=(10, 5))
+    ).pack(anchor="w")
 
-    text_frame = ttk.Frame(window)
-    text_frame.pack(fill="both", expand=True, padx=20, pady=10)
+    search_entry = tk.Entry(
+        form,
+        font=("TkDefaultFont", 11)
+    )
+    search_entry.pack(fill="x", pady=(5, 10))
 
-    text_box = tk.Text(
-        text_frame,
+    results_list = tk.Listbox(
+        form,
+        font=("TkDefaultFont", 10),
+        bg="white",
+        fg="#3f2f24"
+    )
+    results_list.pack(fill="both", expand=True, pady=(5, 10))
+
+    def perform_search():
+        search_term = search_entry.get().strip()
+
+        results_list.delete(0, "end")
+
+        conn = sqlite3.connect(
+            "/home/tim/BibleStudy/bible_study.db"
+        )
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, title
+            FROM prayers
+            WHERE title LIKE ? OR prayer LIKE ?
+            ORDER BY id DESC
+            """,
+            (f"%{search_term}%", f"%{search_term}%")
+        )
+
+        results = cursor.fetchall()
+        conn.close()
+
+        for prayer_id, title in results:
+            results_list.insert(
+                "end",
+                f"{prayer_id}: {title}"
+            )
+
+        if not results:
+            results_list.insert(
+                "end",
+                "No prayers found."
+            )
+
+    tk.Button(
+        form,
+        text="Search",
+        command=perform_search,
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        width=18,
+        height=1,
+        relief="solid",
+        bd=1,
+        cursor="hand2"
+    ).pack()
+
+    search_entry.focus_set()
+
+
+def new_prayer(refresh_callback=None):
+    prayer_window = tk.Toplevel()
+    prayer_window.title("New Prayer")
+    prayer_window.geometry("650x500")
+    prayer_window.configure(bg="#f4f1ea")
+
+    header = tk.Frame(
+        prayer_window,
+        bg="#3f2f24"
+    )
+    header.pack(fill="x")
+
+    tk.Label(
+        header,
+        text="New Prayer",
+        font=("TkDefaultFont", 20, "bold"),
+        bg="#3f2f24",
+        fg="#f5e6c8"
+    ).pack(pady=15)
+
+    form = tk.Frame(
+        prayer_window,
+        bg="#f4f1ea"
+    )
+    form.pack(fill="both", expand=True, padx=25, pady=20)
+
+    tk.Label(
+        form,
+        text="Prayer Title",
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(anchor="w")
+
+    title_entry = tk.Entry(
+        form,
+        font=("TkDefaultFont", 11)
+    )
+    title_entry.pack(fill="x", pady=(5, 15))
+
+    tk.Label(
+        form,
+        text="Prayer",
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24"
+    ).pack(anchor="w")
+
+    prayer_text = tk.Text(
+        form,
+        font=("TkDefaultFont", 11),
+        bg="white",
+        fg="#3f2f24",
         wrap="word",
-        font=("TkDefaultFont", 12)
+        height=12
     )
-    text_box.pack(side="left", fill="both", expand=True)
+    prayer_text.pack(fill="both", expand=True, pady=(5, 15))
 
-    scrollbar = ttk.Scrollbar(
-        text_frame,
-        orient="vertical",
-        command=text_box.yview
-    )
-    scrollbar.pack(side="right", fill="y")
+    def save_prayer():
+        title = title_entry.get().strip()
+        prayer = prayer_text.get("1.0", "end").strip()
 
-    text_box.configure(yscrollcommand=scrollbar.set)
-
-    text_box.insert(
-        tk.END,
-        "Retrieving Constable's Notes...\n\n"
-    )
-    window.update_idletasks()
-
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            pdf_path = os.path.join(temp_dir, "romans.pdf")
-            txt_path = os.path.join(temp_dir, "romans.txt")
-
-            urllib.request.urlretrieve(pdf_url, pdf_path)
-
-            result = subprocess.run(
-                ["pdftotext", "-layout", pdf_path, txt_path],
-                capture_output=True,
-                text=True
+        if not title:
+            messagebox.showerror(
+                "Missing Title",
+                "Please enter a prayer title."
             )
+            return
 
-            if result.returncode != 0:
-                raise RuntimeError(
-                    "The system could not convert the Constable PDF to text."
-                )
-
-            with open(txt_path, "r", encoding="utf-8", errors="replace") as f:
-                commentary = f.read()
-
-        lines = commentary.splitlines()
-
-        if start_verse is None:
-            pattern = re.compile(
-                rf"^\s*{chapter}:(\d+)(?:-(\d+))?\s+.*"
+        if not prayer:
+            messagebox.showerror(
+                "Missing Prayer",
+                "Please enter your prayer."
             )
-            matching = [
-                i for i, line in enumerate(lines)
-                if pattern.search(line)
-            ]
-        else:
-            matching = []
-            for verse in range(start_verse, end_verse + 1):
-                patterns = [
-                    re.compile(
-                        rf"^\s*{chapter}:{verse}(?:-(\d+))?\s+.*",
-                        re.IGNORECASE
-                    ),
-                    re.compile(
-                        rf"\b{chapter}:{verse}\s+and\s+\d+\b",
-                        re.IGNORECASE
-                    ),
-                    re.compile(
-                        rf"\b{chapter}:{verse}\s+through\s+\d+\b",
-                        re.IGNORECASE
-                    ),
-                    re.compile(
-                        rf"\b{chapter}:{verse}-\d+\b",
-                        re.IGNORECASE
-                    )
-                ]
+            return
 
-                found = [
-                    i for i, line in enumerate(lines)
-                    if any(pattern.search(line) for pattern in patterns)
-                ]
+        conn = sqlite3.connect(
+            "/home/tim/BibleStudy/bible_study.db"
+        )
+        cursor = conn.cursor()
 
-                if found:
-                    matching.append(found[0])
-
-        if not matching:
-            raise RuntimeError(
-                f"Could not find Constable's Notes for {passage}."
-            )
-
-        first_line = min(matching)
-
-        if start_verse is None:
-            next_pattern = re.compile(
-                rf"^\\s*{chapter + 1}:1(?:-(\\d+))?\\s+"
-            )
-        else:
-            next_verse = end_verse + 1
-            next_pattern = re.compile(
-                rf"^\\s*{chapter}:{next_verse}(?:-(\\d+))?\\s+"
-            )
-
-        end_line = None
-
-        for i in range(first_line + 1, len(lines)):
-            if next_pattern.search(lines[i]):
-                end_line = i
-                break
-
-        if end_line is None:
-            end_line = min(first_line + 300, len(lines))
-
-        selected = lines[first_line:end_line]
-
-        while selected and not selected[-1].strip():
-            selected.pop()
-
-        text_box.delete("1.0", tk.END)
-
-        text_box.insert(
-            tk.END,
-            f"Constable's Notes for {passage}\n"
-            f"{'=' * 70}\n\n"
+        cursor.execute(
+            """
+            INSERT INTO prayers (title, prayer, created_at)
+            VALUES (?, ?, datetime('now'))
+            """,
+            (title, prayer)
         )
 
-        text_box.insert(
-            tk.END,
-            "\n".join(selected)
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo(
+            "Prayer Saved",
+            "Your prayer has been saved successfully."
         )
 
-        text_box.insert(
-            tk.END,
-            "\n\n"
-            + "=" * 70
-            + "\n"
-            "Source: Dr. Thomas L. Constable's Expository Notes on Romans.\n"
-            "2026 Edition.\n"
-        )
+        prayer_window.destroy()
 
-    except Exception as error:
-        text_box.delete("1.0", tk.END)
-        text_box.insert(
-            tk.END,
-            "Unable to retrieve Constable's Notes.\n\n"
-            f"Error: {error}\n\n"
-            f"Source: {pdf_url}"
-        )
+        if refresh_callback:
+            refresh_callback()
 
-    ttk.Button(
-        window,
-        text="Close",
-        command=window.destroy
-    ).pack(pady=(0, 15))
+    tk.Button(
+        form,
+        text="Save Prayer",
+        command=save_prayer,
+        font=("TkDefaultFont", 11, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        width=18,
+        height=1,
+        relief="solid",
+        bd=1,
+        cursor="hand2"
+    ).pack()
+
+    title_entry.focus_set()
 
 
 def show_dashboard():
@@ -1563,7 +1377,7 @@ def show_topics():
     topics = load_topics()
 
     def add_topic():
-        add_window = tk.Toplevel(window)
+        add_window = tk.Toplevel()
         add_window.title("Add Topic")
         add_window.geometry("650x450")
         add_window.configure(bg="#f4f1ea")
@@ -1678,9 +1492,9 @@ def show_topics():
 
         topic = topics[selection[0]]
 
-        edit_window = tk.Toplevel(window)
+        edit_window = tk.Toplevel()
         edit_window.title("Edit Topic")
-        edit_window.geometry("650x450")
+        edit_window.geometry("650x650")
         edit_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -2022,9 +1836,9 @@ def show_cross_references():
 
         reference = references[selection[0]]
 
-        edit_window = tk.Toplevel(window)
+        edit_window = tk.Toplevel()
         edit_window.title("Edit Cross Reference")
-        edit_window.geometry("650x450")
+        edit_window.geometry("650x650")
         edit_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -2449,9 +2263,9 @@ def view_sermon_notes():
 
         sermon = sermons[selection[0]]
 
-        edit_window = tk.Toplevel(window)
+        edit_window = tk.Toplevel()
         edit_window.title("Edit Sermon")
-        edit_window.geometry("650x450")
+        edit_window.geometry("650x650")
         edit_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -2511,6 +2325,19 @@ def view_sermon_notes():
             scripture = scripture_entry.get().strip()
             content = content_text.get("1.0", tk.END).strip()
 
+            try:
+                selected_time = datetime.strptime(
+                    entered_time,
+                    "%I:%M %p"
+                ).time()
+                reminder_time = selected_time.strftime("%H:%M")
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Time",
+                    "Please enter the time in HH:MM AM/PM format."
+                )
+                return
+
             if not title:
                 messagebox.showwarning(
                     "Missing Title",
@@ -2539,11 +2366,11 @@ def view_sermon_notes():
 
             messagebox.showinfo(
                 "Sermon Updated",
-                "Sermon notes updated successfully!"
+                "Sermon notes updated successfully!",
+                parent=edit_window
             )
 
             edit_window.destroy()
-            window.destroy()
             view_sermon_notes()
 
         ttk.Button(
@@ -2558,6 +2385,49 @@ def view_sermon_notes():
             command=edit_window.destroy
         ).pack(side="left", padx=20, pady=15)
 
+    def delete_sermon():
+        selection = sermon_list.curselection()
+
+        if not selection:
+            messagebox.showwarning(
+                "Select Sermon",
+                "Please select a sermon to delete."
+            )
+            return
+
+        sermon = sermons[selection[0]]
+
+        confirm = messagebox.askyesno(
+            "Delete Sermon",
+            f"Are you sure you want to delete:\n\n{sermon[1]}?",
+            parent=window
+        )
+
+        if not confirm:
+            return
+
+        conn = sqlite3.connect(
+            "/home/tim/BibleStudy/bible_study.db"
+        )
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "DELETE FROM sermons WHERE id = ?",
+            (sermon[0],)
+        )
+
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo(
+            "Sermon Deleted",
+            "Sermon notes deleted successfully.",
+            parent=window
+        )
+
+        window.destroy()
+        view_sermon_notes()
+
     button_frame = ttk.Frame(window)
     button_frame.pack(pady=15)
 
@@ -2565,6 +2435,12 @@ def view_sermon_notes():
         button_frame,
         text="Edit Sermon",
         command=edit_sermon
+    ).pack(side="left", padx=10)
+
+    ttk.Button(
+        button_frame,
+        text="Delete Sermon",
+        command=delete_sermon
     ).pack(side="left", padx=10)
 
     ttk.Button(
@@ -2758,17 +2634,15 @@ def show_calendar(parent):
         from tkinter import messagebox
         from datetime import datetime
 
-        conn = sqlite3.connect(
-            "/home/tim/BibleStudy/bible_study.db"
-        )
+        conn = sqlite3.connect("/home/tim/BibleStudy/bible_study.db")
         cursor = conn.cursor()
 
         cursor.execute(
             """
-            SELECT id, title, details
+            SELECT id, reminder_time, title, details
             FROM calendar_reminders
             WHERE reminder_date = ?
-            ORDER BY id
+            ORDER BY reminder_time, id
             """,
             (selected_date,)
         )
@@ -2785,7 +2659,8 @@ def show_calendar(parent):
 
         reminder_window = tk.Toplevel(calendar_window)
         reminder_window.title("Calendar Reminders")
-        reminder_window.geometry("650x450")
+        reminder_window.geometry("700x500")
+        reminder_window.minsize(650, 450)
         reminder_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -2818,60 +2693,155 @@ def show_calendar(parent):
             pady=20
         )
 
-        reminder_text = tk.Text(
-            content,
-            wrap="word",
-            font=("TkDefaultFont", 11),
-            bg="white",
-            fg="#3f2f24",
-            relief="solid",
-            bd=1
-        )
-        reminder_text.pack(
-            fill="both",
-            expand=True
-        )
+        for reminder_id, reminder_time, title, details in reminders:
 
-        for index, (reminder_id, title, details) in enumerate(reminders, start=1):
-            reminder_text.insert(
-                tk.END,
-                f"{index}. {title}\n",
-                "title"
+            reminder_frame = tk.Frame(
+                content,
+                bg="#e2ddd4",
+                bd=1,
+                relief="solid"
+            )
+            reminder_frame.pack(
+                fill="x",
+                pady=8
+            )
+
+            if reminder_time:
+                try:
+                    display_time = datetime.strptime(
+                        reminder_time,
+                        "%H:%M"
+                    ).strftime("%I:%M %p")
+                except ValueError:
+                    display_time = reminder_time
+            else:
+                display_time = "Time not set"
+
+            tk.Label(
+                reminder_frame,
+                text=display_time,
+                font=("TkDefaultFont", 11, "bold"),
+                bg="#e2ddd4",
+                fg="#3f2f24",
+                width=12,
+                anchor="w"
+            ).pack(
+                side="left",
+                padx=(15, 5),
+                pady=15
+            )
+
+            text_frame = tk.Frame(
+                reminder_frame,
+                bg="#e2ddd4"
+            )
+            text_frame.pack(
+                side="left",
+                fill="both",
+                expand=True,
+                padx=5,
+                pady=10
+            )
+
+            tk.Label(
+                text_frame,
+                text=title,
+                font=("TkDefaultFont", 12, "bold"),
+                bg="#e2ddd4",
+                fg="#3f2f24",
+                anchor="w",
+                justify="left",
+                wraplength=350
+            ).pack(
+                anchor="w"
             )
 
             if details:
-                reminder_text.insert(
-                    tk.END,
-                    f"{details}\n"
+                tk.Label(
+                    text_frame,
+                    text=details,
+                    font=("TkDefaultFont", 10),
+                    bg="#e2ddd4",
+                    fg="#3f2f24",
+                    anchor="w",
+                    justify="left",
+                    wraplength=350
+                ).pack(
+                    anchor="w",
+                    pady=(5, 0)
                 )
 
-            reminder_text.insert(
-                tk.END,
-                "\n"
+            def delete_reminder(
+                reminder_id=reminder_id,
+                reminder_window=reminder_window,
+                selected_date=selected_date
+            ):
+                confirm = messagebox.askyesno(
+                    "Delete Reminder",
+                    "Are you sure you want to delete this reminder?",
+                    parent=reminder_window
+                )
+
+                if not confirm:
+                    return
+
+                conn = sqlite3.connect(
+                    "/home/tim/BibleStudy/bible_study.db"
+                )
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    """
+                    DELETE FROM calendar_reminders
+                    WHERE id = ?
+                    """,
+                    (reminder_id,)
+                )
+
+                conn.commit()
+                conn.close()
+
+                reminder_window.destroy()
+
+                draw_calendar()
+
+                show_reminders(selected_date)
+
+            tk.Button(
+                reminder_frame,
+                text="Delete",
+                command=delete_reminder,
+                font=("TkDefaultFont", 10, "bold"),
+                bg="#3f2f24",
+                fg="white",
+                activebackground="#5a4434",
+                activeforeground="white",
+                width=12,
+                height=1,
+                relief="flat",
+                cursor="hand2"
+            ).pack(
+                side="right",
+                padx=15,
+                pady=15
             )
-
-        reminder_text.tag_configure(
-            "title",
-            font=("TkDefaultFont", 12, "bold"),
-            foreground="#3f2f24"
-        )
-
-        reminder_text.configure(state="disabled")
 
         tk.Button(
             reminder_window,
             text="Close",
             command=reminder_window.destroy,
-            font=("TkDefaultFont", 10, "bold"),
+            font=("TkDefaultFont", 11, "bold"),
             bg="#3f2f24",
             fg="white",
             activebackground="#5a4434",
             activeforeground="white",
-            width=18,
-            height=2,
+            width=20,
+            height=1,
             relief="flat",
             cursor="hand2"
-        ).pack(pady=(0, 20))
+        ).pack(
+            pady=(0, 20)
+        )
 
     def add_reminder():
         from datetime import date, datetime
@@ -2879,7 +2849,8 @@ def show_calendar(parent):
 
         reminder_window = tk.Toplevel(calendar_window)
         reminder_window.title("Add Calendar Reminder")
-        reminder_window.geometry("650x450")
+        reminder_window.geometry("700x550")
+        reminder_window.minsize(650, 500)
         reminder_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -2938,12 +2909,41 @@ def show_calendar(parent):
 
         tk.Label(
             form,
-            text="Reminder Title:",
+            text="Time (HH:MM AM/PM):",
             font=("TkDefaultFont", 10, "bold"),
             bg="#f4f1ea",
             fg="#3f2f24"
         ).grid(
             row=1,
+            column=0,
+            sticky="w",
+            pady=10
+        )
+
+        time_entry = tk.Entry(
+            form,
+            width=30,
+            font=("TkDefaultFont", 10)
+        )
+        time_entry.grid(
+            row=1,
+            column=1,
+            sticky="w",
+            pady=10
+        )
+        time_entry.insert(
+            0,
+            datetime.now().strftime("%I:%M %p")
+        )
+
+        tk.Label(
+            form,
+            text="Reminder Title:",
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24"
+        ).grid(
+            row=2,
             column=0,
             sticky="w",
             pady=10
@@ -2955,7 +2955,7 @@ def show_calendar(parent):
             font=("TkDefaultFont", 10)
         )
         title_entry.grid(
-            row=1,
+            row=2,
             column=1,
             sticky="ew",
             pady=10
@@ -2968,7 +2968,7 @@ def show_calendar(parent):
             bg="#f4f1ea",
             fg="#3f2f24"
         ).grid(
-            row=2,
+            row=3,
             column=0,
             sticky="nw",
             pady=10
@@ -2981,17 +2981,18 @@ def show_calendar(parent):
             font=("TkDefaultFont", 10)
         )
         details_text.grid(
-            row=2,
+            row=3,
             column=1,
             sticky="nsew",
             pady=10
         )
 
         form.columnconfigure(1, weight=1)
-        form.rowconfigure(2, weight=1)
+        form.rowconfigure(3, weight=1)
 
         def save_reminder():
             entered_date = date_entry.get().strip()
+            entered_time = time_entry.get().strip()
             title = title_entry.get().strip()
             details = details_text.get(
                 "1.0",
@@ -3011,6 +3012,19 @@ def show_calendar(parent):
                 )
                 return
 
+            try:
+                selected_time = datetime.strptime(
+                    entered_time,
+                    "%I:%M %p"
+                ).time()
+                reminder_time = selected_time.strftime("%H:%M")
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Time",
+                    "Please enter the time in HH:MM AM/PM format."
+                )
+                return
+
             if not title:
                 messagebox.showwarning(
                     "Missing Reminder Title",
@@ -3026,10 +3040,10 @@ def show_calendar(parent):
             cursor.execute(
                 """
                 INSERT INTO calendar_reminders
-                (reminder_date, title, details)
-                VALUES (?, ?, ?)
+                (reminder_date, reminder_time, title, details)
+                VALUES (?, ?, ?, ?)
                 """,
-                (reminder_date, title, details)
+                (reminder_date, reminder_time, title, details)
             )
 
             conn.commit()
@@ -3053,13 +3067,13 @@ def show_calendar(parent):
             button_frame,
             text="Save Reminder",
             command=save_reminder,
-            font=("TkDefaultFont", 10, "bold"),
+            font=("TkDefaultFont", 11, "bold"),
             bg="#3f2f24",
             fg="white",
             activebackground="#5a4434",
             activeforeground="white",
-            width=18,
-            height=2,
+            width=20,
+            height=1,
             relief="flat",
             cursor="hand2"
         ).pack(
@@ -3071,13 +3085,13 @@ def show_calendar(parent):
             button_frame,
             text="Cancel",
             command=reminder_window.destroy,
-            font=("TkDefaultFont", 10, "bold"),
+            font=("TkDefaultFont", 11, "bold"),
             bg="#e8d8bd",
             fg="#3f2f24",
             activebackground="#c9b89f",
             activeforeground="#3f2f24",
-            width=18,
-            height=2,
+            width=20,
+            height=1,
             relief="flat",
             cursor="hand2"
         ).pack(
@@ -3720,6 +3734,19 @@ def personal_bible_study():
     )
     study_text.grid(row=2, column=1, sticky="nsew", pady=8)
 
+    # Right-click editing menu
+    study_menu = tk.Menu(study_text, tearoff=0)
+    study_menu.add_command(label="Cut", command=lambda: study_text.event_generate("<<Cut>>"))
+    study_menu.add_command(label="Copy", command=lambda: study_text.event_generate("<<Copy>>"))
+    study_menu.add_command(label="Paste", command=lambda: study_text.event_generate("<<Paste>>"))
+    study_menu.add_separator()
+    study_menu.add_command(label="Select All", command=lambda: study_text.tag_add("sel", "1.0", "end"))
+
+    def show_study_menu(event):
+        study_menu.tk_popup(event.x_root, event.y_root)
+
+    study_text.bind("<Button-3>", show_study_menu)
+
     form.columnconfigure(1, weight=1)
     form.rowconfigure(2, weight=1)
 
@@ -3727,6 +3754,22 @@ def personal_bible_study():
         title = title_entry.get().strip()
         reference = reference_entry.get().strip()
         content = study_text.get("1.0", tk.END).strip()
+
+        hyperlinks = []
+
+        if hasattr(study_text, "_hyperlink_urls"):
+            for tag_name, url in study_text._hyperlink_urls.items():
+                ranges = study_text.tag_ranges(tag_name)
+
+                for i in range(0, len(ranges), 2):
+                    start = str(ranges[i])
+                    end = str(ranges[i + 1])
+
+                    hyperlinks.append({
+                        "start": start,
+                        "end": end,
+                        "url": url
+                    })
 
         if not title:
             messagebox.showwarning(
@@ -3746,19 +3789,31 @@ def personal_bible_study():
                 title TEXT NOT NULL,
                 reference TEXT,
                 content TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                hyperlinks TEXT
             )
         """)
 
+        cursor.execute("PRAGMA table_info(personal_studies)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "hyperlinks" not in columns:
+            cursor.execute(
+                "ALTER TABLE personal_studies ADD COLUMN hyperlinks TEXT"
+            )
+
+        import json
+
         cursor.execute("""
             INSERT INTO personal_studies
-            (title, reference, content, created_at)
-            VALUES (?, ?, ?, ?)
+            (title, reference, content, created_at, hyperlinks)
+            VALUES (?, ?, ?, ?, ?)
         """, (
             title,
             reference,
             content,
-            datetime.now().strftime("%Y-%m-%d %H:%M")
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            json.dumps(hyperlinks)
         ))
 
         conn.commit()
@@ -3766,7 +3821,8 @@ def personal_bible_study():
 
         messagebox.showinfo(
             "Study Saved",
-            "Personal Bible Study saved successfully!"
+            "Personal Bible Study saved successfully!",
+            parent=window
         )
 
         title_entry.delete(0, tk.END)
@@ -3868,7 +3924,7 @@ def view_personal_studies():
     """)
 
     cursor.execute("""
-        SELECT id, title, reference, content, created_at
+        SELECT id, title, reference, content, created_at, hyperlinks
         FROM personal_studies
         ORDER BY id DESC
     """)
@@ -3937,9 +3993,9 @@ def view_personal_studies():
 
         study = current_studies[selection[0]]
 
-        edit_window = tk.Toplevel(window)
+        edit_window = tk.Toplevel()
         edit_window.title("Edit Personal Bible Study")
-        edit_window.geometry("650x450")
+        edit_window.geometry("650x650")
         edit_window.configure(bg="#f4f1ea")
 
         header = tk.Frame(
@@ -3991,6 +4047,57 @@ def view_personal_studies():
         content_text.grid(row=2, column=1, sticky="nsew", pady=8)
         content_text.insert("1.0", study[3])
 
+        # Right-click editing menu
+        content_menu = tk.Menu(content_text, tearoff=0)
+        content_menu.add_command(label="Cut", command=lambda: content_text.event_generate("<<Cut>>"))
+        content_menu.add_command(label="Copy", command=lambda: content_text.event_generate("<<Copy>>"))
+        content_menu.add_command(label="Paste", command=lambda: content_text.event_generate("<<Paste>>"))
+        content_menu.add_separator()
+        content_menu.add_command(label="Select All", command=lambda: content_text.tag_add("sel", "1.0", "end"))
+
+        def show_content_menu(event):
+            content_menu.tk_popup(event.x_root, event.y_root)
+
+        content_text.bind("<Button-3>", show_content_menu)
+
+        # Restore saved hyperlinks
+        import json
+        import webbrowser
+
+        content_text._hyperlink_urls = {}
+
+        try:
+            saved_hyperlinks = json.loads(study[5] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            saved_hyperlinks = []
+
+        for index, link_data in enumerate(saved_hyperlinks):
+            tag_name = f"hyperlink_{id(content_text)}_{index}"
+            url = link_data.get("url")
+
+            if not url:
+                continue
+
+            content_text._hyperlink_urls[tag_name] = url
+
+            content_text.tag_configure(
+                tag_name,
+                foreground="blue",
+                underline=True
+            )
+
+            content_text.tag_add(
+                tag_name,
+                link_data.get("start"),
+                link_data.get("end")
+            )
+
+            content_text.tag_bind(
+                tag_name,
+                "<Button-1>",
+                lambda event, link=url: webbrowser.open(link)
+            )
+
         form.columnconfigure(1, weight=1)
         form.rowconfigure(2, weight=1)
 
@@ -3998,6 +4105,22 @@ def view_personal_studies():
             title = title_entry.get().strip()
             reference = reference_entry.get().strip()
             content = content_text.get("1.0", tk.END).strip()
+
+            hyperlinks = []
+
+            if hasattr(content_text, "_hyperlink_urls"):
+                for tag_name, url in content_text._hyperlink_urls.items():
+                    ranges = content_text.tag_ranges(tag_name)
+
+                    for i in range(0, len(ranges), 2):
+                        start = str(ranges[i])
+                        end = str(ranges[i + 1])
+
+                        hyperlinks.append({
+                            "start": start,
+                            "end": end,
+                            "url": url
+                        })
 
             if not title:
                 messagebox.showwarning(
@@ -4011,14 +4134,17 @@ def view_personal_studies():
             )
             cursor = conn.cursor()
 
+            import json
+
             cursor.execute("""
                 UPDATE personal_studies
-                SET title = ?, reference = ?, content = ?
+                SET title = ?, reference = ?, content = ?, hyperlinks = ?
                 WHERE id = ?
             """, (
                 title,
                 reference,
                 content,
+                json.dumps(hyperlinks),
                 study[0]
             ))
 
@@ -4027,11 +4153,11 @@ def view_personal_studies():
 
             messagebox.showinfo(
                 "Study Updated",
-                "Personal Bible Study updated successfully!"
+                "Personal Bible Study updated successfully!",
+                parent=edit_window
             )
 
             edit_window.destroy()
-            window.destroy()
             view_personal_studies()
 
         button_frame = ttk.Frame(edit_window)
@@ -4125,16 +4251,134 @@ def create_prayer_table():
     conn.commit()
     conn.close()
 
+def check_calendar_reminders(root):
+    from datetime import datetime
+
+    now = datetime.now()
+    current_date = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%H:%M")
+
+    conn = sqlite3.connect(
+        "/home/tim/BibleStudy/bible_study.db"
+    )
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, details
+        FROM calendar_reminders
+        WHERE reminder_date = ?
+        AND reminder_time = ?
+        """,
+        (current_date, current_time)
+    )
+
+    due_reminders = cursor.fetchall()
+    conn.close()
+
+    for reminder_id, title, details in due_reminders:
+        import subprocess
+
+        subprocess.Popen(
+            [
+                "paplay",
+                "/usr/share/sounds/freedesktop/stereo/complete.oga"
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        reminder_window = tk.Toplevel(root)
+        reminder_window.title("Calendar Reminder")
+        reminder_window.geometry("420x300")
+        reminder_window.resizable(False, False)
+        reminder_window.configure(bg="#f4f1ea")
+
+        reminder_window.transient(root)
+        reminder_window.lift()
+        reminder_window.attributes("-topmost", True)
+        reminder_window.focus_force()
+
+        header = tk.Frame(
+            reminder_window,
+            bg="#3f2f24"
+        )
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
+            text="🔔 CALENDAR REMINDER",
+            font=("TkDefaultFont", 16, "bold"),
+            bg="#3f2f24",
+            fg="#f5e6c8"
+        ).pack(pady=12)
+
+        content = tk.Frame(
+            reminder_window,
+            bg="#f4f1ea"
+        )
+        content.pack(
+            fill="both",
+            expand=True,
+            padx=25,
+            pady=15
+        )
+
+        tk.Label(
+            content,
+            text=title,
+            font=("TkDefaultFont", 14, "bold"),
+            bg="#f4f1ea",
+            fg="#3f2f24",
+            wraplength=360
+        ).pack(pady=(5, 10))
+
+        if details:
+            tk.Label(
+                content,
+                text=details,
+                font=("TkDefaultFont", 11),
+                bg="#f4f1ea",
+                fg="#3f2f24",
+                wraplength=360,
+                justify="left"
+            ).pack(pady=(0, 10))
+
+        tk.Button(
+            reminder_window,
+            text="Dismiss",
+            command=reminder_window.destroy,
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#3f2f24",
+            fg="white",
+            activebackground="#5a4434",
+            activeforeground="white",
+            width=16,
+            height=1,
+            relief="flat",
+            cursor="hand2"
+        ).pack(pady=(0, 15))
+
+    root.after(
+        30000,
+        lambda: check_calendar_reminders(root)
+    )
+
+
 def main():
     from datetime import date
     create_prayer_table()
 
     root = tk.Tk()
+    root.bind_class("Text", "<Control-k>", hyperlink_ctrl_k)
     root.attributes("-zoomed", True)
     root.title("Bible Study")
     root.geometry("950x700")
     root.minsize(800, 600)
     root.configure(bg="#f4f1ea")
+
+    # Start calendar reminder checker
+    check_calendar_reminders(root)
 
     # Header
     header = tk.Frame(
@@ -4254,7 +4498,7 @@ def main():
         fill="x",
         pady=(0, 5)
     )
-    lower_frame.configure(height=350)
+    lower_frame.configure(height=300)
     lower_frame.pack_propagate(False)
 
     lower_frame.columnconfigure(0, weight=1)
@@ -4286,15 +4530,35 @@ def main():
     )
     prayer_button_frame.pack(pady=(0, 8))
 
-    for text in ("New", "Search", "Delete"):
-        tk.Button(
-            prayer_button_frame,
-            text=text,
-            font=("TkDefaultFont", 10, "bold"),
-            bg="#f4f1ea",
-            fg="#3f2f24",
-            width=8
-        ).pack(side="left", padx=3)
+    tk.Button(
+        prayer_button_frame,
+        text="New",
+        command=lambda: new_prayer(refresh_prayer_list),
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24",
+        width=8
+    ).pack(side="left", padx=3)
+
+    tk.Button(
+        prayer_button_frame,
+        text="Search",
+        command=search_prayers,
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24",
+        width=8
+    ).pack(side="left", padx=3)
+
+    tk.Button(
+        prayer_button_frame,
+        text="Delete",
+        command=lambda: delete_prayer(prayer_list, refresh_prayer_list),
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#f4f1ea",
+        fg="#3f2f24",
+        width=8
+    ).pack(side="left", padx=3)
 
     prayer_list = tk.Listbox(
         prayer_frame,
@@ -4305,6 +4569,26 @@ def main():
         width=32
     )
     prayer_list.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+
+    def refresh_prayer_list():
+        prayer_list.delete(0, "end")
+
+        conn = sqlite3.connect(
+            "/home/tim/BibleStudy/bible_study.db"
+        )
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, title FROM prayers ORDER BY id DESC"
+        )
+
+        saved_prayers = cursor.fetchall()
+        conn.close()
+
+        for prayer_id, title in saved_prayers:
+            prayer_list.insert("end", title)
+
+    refresh_prayer_list()
 
     # Bible Study Tools
     tools_frame = tk.Frame(
@@ -4350,7 +4634,7 @@ def main():
             activebackground="#c9b89f",
             activeforeground="#3f2f24",
             width=30,
-            height=2,
+            height=1,
             relief="solid",
             bd=1,
             cursor="hand2"
@@ -4466,9 +4750,15 @@ def main():
         cursor="hand2"
     ).pack(pady=(0, 12))
 
-    # Bible Hub button
-    tk.Button(
+    # Bible Hub and NET Bible Website buttons
+    resource_frame = tk.Frame(
         content,
+        bg="#f4f1ea"
+    )
+    resource_frame.pack(pady=(5, 2))
+
+    tk.Button(
+        resource_frame,
         text="Bible Hub",
         command=lambda: __import__("webbrowser").open("https://biblehub.com/"),
         font=("TkDefaultFont", 10, "bold"),
@@ -4477,10 +4767,41 @@ def main():
         activebackground="#c9b89f",
         activeforeground="#3f2f24",
         width=18,
-        height=2,
+        height=1,
         relief="flat",
         cursor="hand2"
-    ).pack(pady=(15, 0))
+    ).pack(side="left", padx=5)
+
+    tk.Button(
+        resource_frame,
+        text="NET Bible Website",
+        command=lambda: __import__("webbrowser").open("https://netbible.org"),
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        width=18,
+        height=1,
+        relief="flat",
+        cursor="hand2"
+    ).pack(side="left", padx=5)
+
+    # Other Bible Resources button
+    tk.Button(
+        content,
+        text="📚 Other Bible Resources",
+        command=lambda: __import__("webbrowser").open("https://www.studylight.org/commentaries/eng.html"),
+        font=("TkDefaultFont", 10, "bold"),
+        bg="#e8d8bd",
+        fg="#3f2f24",
+        activebackground="#c9b89f",
+        activeforeground="#3f2f24",
+        width=24,
+        height=1,
+        relief="flat",
+        cursor="hand2"
+    ).pack(pady=(2, 0))
 
     # Exit button
     tk.Button(
@@ -4493,10 +4814,10 @@ def main():
         activebackground="#5a4434",
         activeforeground="white",
         width=18,
-        height=2,
+        height=1,
         relief="flat",
         cursor="hand2"
-    ).pack(pady=(15, 0))
+    ).pack(pady=(2, 0))
 
     root.mainloop()
 
