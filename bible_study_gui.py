@@ -1082,6 +1082,9 @@ def show_dashboard():
     conn.close()
 
     window = tk.Toplevel()
+    window.transient()
+    window.lift()
+    window.focus_force()
     window.title("Bible Study Dashboard")
     window.geometry("900x700")
     window.attributes("-zoomed", True)
@@ -1307,6 +1310,9 @@ def show_topics():
     from tkinter import messagebox
 
     window = tk.Toplevel()
+    window.transient()
+    window.lift()
+    window.focus_force()
     window.title("Topics")
     window.geometry("700x600")
     window.attributes("-zoomed", True)
@@ -1733,6 +1739,9 @@ def show_cross_references():
     from tkinter import messagebox
 
     window = tk.Toplevel()
+    window.transient()
+    window.lift()
+    window.focus_force()
     window.title("Cross References")
     window.geometry("700x600")
     window.attributes("-zoomed", True)
@@ -2192,6 +2201,9 @@ def view_sermon_notes():
     window = tk.Toplevel()
     window.title("Saved Sermon Notes")
     window.configure(bg="#f4f1ea")
+    window.transient()
+    window.lift()
+    window.focus_force()
 
     header = tk.Frame(
         window,
@@ -2325,18 +2337,6 @@ def view_sermon_notes():
             scripture = scripture_entry.get().strip()
             content = content_text.get("1.0", tk.END).strip()
 
-            try:
-                selected_time = datetime.strptime(
-                    entered_time,
-                    "%I:%M %p"
-                ).time()
-                reminder_time = selected_time.strftime("%H:%M")
-            except ValueError:
-                messagebox.showwarning(
-                    "Invalid Time",
-                    "Please enter the time in HH:MM AM/PM format."
-                )
-                return
 
             if not title:
                 messagebox.showwarning(
@@ -2433,9 +2433,16 @@ def view_sermon_notes():
 
     ttk.Button(
         button_frame,
+        text="New Sermon Note",
+        command=show_sermon_notes
+    ).pack(side="left", padx=10)
+
+    ttk.Button(
+        button_frame,
         text="Edit Sermon",
         command=edit_sermon
     ).pack(side="left", padx=10)
+
 
     ttk.Button(
         button_frame,
@@ -3859,6 +3866,9 @@ def view_personal_studies():
     window.title("Personal Bible Studies")
     window.geometry("900x700")
     window.attributes("-zoomed", True)
+    window.transient()
+    window.lift()
+    window.focus_force()
     window.configure(bg="#f4f1ea")
 
     header = tk.Frame(
@@ -4219,6 +4229,13 @@ def view_personal_studies():
         view_personal_studies()
 
     button_frame = ttk.Frame(window)
+    button_frame.pack(pady=15)
+
+    ttk.Button(
+        button_frame,
+        text="New Study",
+        command=personal_bible_study
+    ).pack(side="left", padx=10)
     button_frame.pack(pady=15)
 
     ttk.Button(
@@ -4590,6 +4607,11 @@ def main():
 
     refresh_prayer_list()
 
+    def open_bible_com():
+        import webbrowser
+        webbrowser.open("https://www.bible.com")
+
+
     # Bible Study Tools
     tools_frame = tk.Frame(
         lower_frame,
@@ -4616,8 +4638,8 @@ def main():
         ("📊  Study Dashboard", show_dashboard, "#e8d8bd"),
         ("📚  Topics", show_topics, "#d9e6d2"),
         ("🔗  Cross References", show_cross_references, "#ead8e8"),
-        ("📝  Sermon Notes", show_sermon_notes, "#f0dfc0"),
-        ("✍  Personal Bible Study", personal_bible_study, "#e2ddd4")
+        ("📝  Sermon Notes", view_sermon_notes, "#f0dfc0"),
+        ("✍  Personal Bible Study", view_personal_studies, "#e2ddd4"),
     ]
 
     for index, (text_label, command, button_bg) in enumerate(buttons):
@@ -4750,58 +4772,45 @@ def main():
         cursor="hand2"
     ).pack(pady=(0, 12))
 
-    # Bible Hub and NET Bible Website buttons
+    # Bible.com, Bible Hub, NET Bible Website, and StudyLight Website buttons
     resource_frame = tk.Frame(
         content,
         bg="#f4f1ea"
     )
     resource_frame.pack(pady=(5, 2))
 
-    tk.Button(
-        resource_frame,
-        text="Bible Hub",
-        command=lambda: __import__("webbrowser").open("https://biblehub.com/"),
-        font=("TkDefaultFont", 10, "bold"),
-        bg="#e8d8bd",
-        fg="#3f2f24",
-        activebackground="#c9b89f",
-        activeforeground="#3f2f24",
-        width=18,
-        height=1,
-        relief="flat",
-        cursor="hand2"
-    ).pack(side="left", padx=5)
+    resource_buttons = [
+        ("Bible.com", "https://www.bible.com"),
+        ("Bible Hub", "https://biblehub.com/"),
+        ("NET Bible Website", "https://netbible.org"),
+        ("StudyLight Website", "https://www.studylight.org/")
+    ]
 
-    tk.Button(
-        resource_frame,
-        text="NET Bible Website",
-        command=lambda: __import__("webbrowser").open("https://netbible.org"),
-        font=("TkDefaultFont", 10, "bold"),
-        bg="#e8d8bd",
-        fg="#3f2f24",
-        activebackground="#c9b89f",
-        activeforeground="#3f2f24",
-        width=18,
-        height=1,
-        relief="flat",
-        cursor="hand2"
-    ).pack(side="left", padx=5)
+    for index, (label, url) in enumerate(resource_buttons):
+        row = index // 2
+        column = index % 2
 
-    # Other Bible Resources button
-    tk.Button(
-        content,
-        text="📚 Other Bible Resources",
-        command=lambda: __import__("webbrowser").open("https://www.studylight.org/commentaries/eng.html"),
-        font=("TkDefaultFont", 10, "bold"),
-        bg="#e8d8bd",
-        fg="#3f2f24",
-        activebackground="#c9b89f",
-        activeforeground="#3f2f24",
-        width=24,
-        height=1,
-        relief="flat",
-        cursor="hand2"
-    ).pack(pady=(2, 0))
+        tk.Button(
+            resource_frame,
+            text=label,
+            command=lambda link=url: __import__("webbrowser").open(link),
+            font=("TkDefaultFont", 10, "bold"),
+            bg="#e8d8bd",
+            fg="#3f2f24",
+            activebackground="#c9b89f",
+            activeforeground="#3f2f24",
+            width=18,
+            height=1,
+            relief="flat",
+            cursor="hand2"
+        ).grid(
+            row=row,
+            column=column,
+            padx=5,
+            pady=2
+        )
+
+
 
     # Exit button
     tk.Button(
