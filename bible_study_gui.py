@@ -158,6 +158,85 @@ def add_hyperlink_to_text(text_widget):
     )
 
 
+def copy_selected_text_with_hyperlinks(text_widget):
+    import html
+
+    try:
+        start_index = text_widget.index(tk.SEL_FIRST)
+        end_index = text_widget.index(tk.SEL_LAST)
+    except tk.TclError:
+        return "break"
+
+    selected_text = text_widget.get(start_index, end_index)
+
+    # Build HTML while preserving hyperlink ranges.
+    html_parts = []
+    current_index = start_index
+
+    hyperlink_tags = []
+
+    for tag in text_widget.tag_names():
+        if not tag.startswith("hyperlink_"):
+            continue
+
+        ranges = text_widget.tag_ranges(tag)
+        url = getattr(text_widget, "_hyperlink_urls", {}).get(tag)
+
+        if len(ranges) >= 2 and url:
+            link_start = text_widget.index(ranges[0])
+            link_end = text_widget.index(ranges[1])
+
+            if text_widget.compare(link_end, ">", start_index) and text_widget.compare(link_start, "<", end_index):
+                hyperlink_tags.append((link_start, link_end, url))
+
+    hyperlink_tags.sort(
+        key=lambda item: (
+            int(item[0].split(".")[0]),
+            int(item[0].split(".")[1])
+        )
+    )
+
+    for link_start, link_end, url in hyperlink_tags:
+        if text_widget.compare(link_start, "<", current_index):
+            link_start = current_index
+
+        if text_widget.compare(link_start, ">", current_index):
+            plain_part = text_widget.get(current_index, link_start)
+            html_parts.append(html.escape(plain_part).replace("\n", "<br>"))
+
+        link_text = text_widget.get(link_start, link_end)
+        html_parts.append(
+            '<a href="' + html.escape(url, quote=True) + '">'
+            + html.escape(link_text).replace("\n", "<br>")
+            + '</a>'
+        )
+
+        current_index = link_end
+
+    if text_widget.compare(current_index, "<", end_index):
+        plain_part = text_widget.get(current_index, end_index)
+        html_parts.append(html.escape(plain_part).replace("\n", "<br>"))
+
+    html_content = "".join(html_parts)
+
+    # Tk clipboard: provide both plain text and HTML.
+    try:
+        text_widget.clipboard_clear()
+        text_widget.clipboard_append(selected_text)
+        text_widget.clipboard_append(
+            html_content,
+            type="text/html"
+        )
+        text_widget.update()
+
+    except Exception:
+        text_widget.clipboard_clear()
+        text_widget.clipboard_append(selected_text)
+        text_widget.update()
+
+    return "break"
+
+
 def serialize_hyperlinks(text_widget):
     import json
 
@@ -189,6 +268,7 @@ def serialize_hyperlinks(text_widget):
 
 def restore_hyperlinks(text_widget, saved_content):
     import json
+    import webbrowser
 
     try:
         data = json.loads(saved_content)
@@ -202,30 +282,28 @@ def restore_hyperlinks(text_widget, saved_content):
     text_widget.insert("1.0", data["text"])
     text_widget._hyperlink_urls = {}
 
-    import webbrowser
-
     for index, link in enumerate(data.get("links", [])):
+        tag_name = f"hyperlink_{id(text_widget)}_{index}"
+
         text_widget.tag_configure(
             tag_name,
             foreground="blue",
             underline=True
         )
+
         text_widget.tag_add(
             tag_name,
             link["start"],
             link["end"]
         )
+
         text_widget._hyperlink_urls[tag_name] = link["url"]
+
         text_widget.tag_bind(
             tag_name,
             "<Button-1>",
             lambda event, url=link["url"]: webbrowser.open(url)
         )
-
-    return "break"
-
-
-    return "break"
 
 
 def style_bible_window(window, title, height=15):
@@ -2130,13 +2208,45 @@ def show_sermon_notes():
     content_text = tk.Text(form, width=70, height=24, wrap="word")
     content_text.grid(row=2, column=1, sticky="nsew", pady=5)
 
+    font_frame = ttk.Frame(form)
+    font_frame.grid(row=3, column=1, sticky="w", pady=(5, 0))
+
+    ttk.Label(font_frame, text="Font Size:").pack(side="left", padx=(0, 8))
+
+    font_size_var = tk.IntVar(value=12)
+
+    font_size_combo = ttk.Combobox(
+        font_frame,
+        textvariable=font_size_var,
+        values=(10, 11, 12, 14, 16, 18, 20, 24),
+        width=5,
+        state="readonly"
+    )
+    font_size_combo.pack(side="left")
+
+    def change_font_size(event=None):
+        content_text.configure(
+            font=("TkDefaultFont", font_size_var.get())
+        )
+
+    font_size_combo.bind("<<ComboboxSelected>>", change_font_size)
+
+    def select_all_sermon_text(event=None):
+        content_text.tag_add("sel", "1.0", "end")
+        content_text.mark_set("insert", "1.0")
+        content_text.see("1.0")
+        return "break"
+
+    content_text.bind("<Control-a>", select_all_sermon_text)
+    content_text.bind("<Control-c>", lambda event: copy_selected_text_with_hyperlinks(content_text))
+
     form.columnconfigure(1, weight=1)
     form.rowconfigure(2, weight=1)
 
     def save_sermon():
         title = title_entry.get().strip()
         scripture = scripture_entry.get().strip()
-        content = content_text.get("1.0", tk.END).strip()
+        content = serialize_hyperlinks(content_text)
 
         if not title:
             messagebox.showwarning(
@@ -2322,21 +2432,51 @@ def view_sermon_notes():
 
         content_text = tk.Text(
             form,
-            width=70,
             height=20,
             wrap="word"
         )
         content_text.grid(row=2, column=1, sticky="nsew", pady=8)
-        content_text.insert("1.0", sermon[3])
+        restore_hyperlinks(content_text, sermon[3])
+
+        font_frame = ttk.Frame(form)
+        font_frame.grid(row=3, column=1, sticky="w", pady=(5, 0))
+
+        ttk.Label(font_frame, text="Font Size:").pack(side="left", padx=(0, 8))
+
+        font_size_var = tk.IntVar(value=12)
+
+        font_size_combo = ttk.Combobox(
+            font_frame,
+            textvariable=font_size_var,
+            values=(10, 11, 12, 14, 16, 18, 20, 24),
+            width=5,
+            state="readonly"
+        )
+        font_size_combo.pack(side="left")
+
+        def change_font_size(event=None):
+            content_text.configure(
+                font=("TkDefaultFont", font_size_var.get())
+            )
+
+        font_size_combo.bind("<<ComboboxSelected>>", change_font_size)
+
+        def select_all_edit_sermon(event=None):
+            content_text.tag_add("sel", "1.0", "end")
+            content_text.mark_set("insert", "1.0")
+            content_text.see("1.0")
+            return "break"
+
+        content_text.bind("<Control-a>", select_all_edit_sermon)
+        content_text.bind("<Control-c>", lambda event: copy_selected_text_with_hyperlinks(content_text))
 
         form.columnconfigure(1, weight=1)
-        form.rowconfigure(2, weight=1)
 
         def save_changes():
             title = title_entry.get().strip()
             scripture = scripture_entry.get().strip()
             content = content_text.get("1.0", tk.END).strip()
-
+            content = serialize_hyperlinks(content_text)
 
             if not title:
                 messagebox.showwarning(
@@ -3741,13 +3881,48 @@ def personal_bible_study():
     )
     study_text.grid(row=2, column=1, sticky="nsew", pady=8)
 
+    font_frame = ttk.Frame(form)
+    font_frame.grid(row=3, column=1, sticky="w", pady=(5, 0))
+
+    ttk.Label(font_frame, text="Font Size:").pack(side="left", padx=(0, 8))
+
+    font_size_var = tk.IntVar(value=12)
+
+    font_size_combo = ttk.Combobox(
+        font_frame,
+        textvariable=font_size_var,
+        values=(10, 11, 12, 14, 16, 18, 20, 24),
+        width=5,
+        state="readonly"
+    )
+    font_size_combo.pack(side="left")
+
+    def change_font_size(event=None):
+        study_text.configure(
+            font=("TkDefaultFont", font_size_var.get())
+        )
+
+    font_size_combo.bind("<<ComboboxSelected>>", change_font_size)
+
     # Right-click editing menu
     study_menu = tk.Menu(study_text, tearoff=0)
     study_menu.add_command(label="Cut", command=lambda: study_text.event_generate("<<Cut>>"))
-    study_menu.add_command(label="Copy", command=lambda: study_text.event_generate("<<Copy>>"))
+    study_menu.add_command(
+        label="Copy",
+        command=lambda: copy_selected_text_with_hyperlinks(study_text)
+    )
     study_menu.add_command(label="Paste", command=lambda: study_text.event_generate("<<Paste>>"))
     study_menu.add_separator()
-    study_menu.add_command(label="Select All", command=lambda: study_text.tag_add("sel", "1.0", "end"))
+    def select_all_study_text(event=None):
+        study_text.tag_add("sel", "1.0", "end")
+        study_text.mark_set("insert", "1.0")
+        study_text.see("1.0")
+        return "break"
+
+    study_menu.add_command(label="Select All", command=select_all_study_text)
+
+    study_text.bind("<Control-a>", select_all_study_text)
+    study_text.bind("<Control-c>", lambda event: copy_selected_text_with_hyperlinks(study_text))
 
     def show_study_menu(event):
         study_menu.tk_popup(event.x_root, event.y_root)
@@ -4057,13 +4232,48 @@ def view_personal_studies():
         content_text.grid(row=2, column=1, sticky="nsew", pady=8)
         content_text.insert("1.0", study[3])
 
+        font_frame = ttk.Frame(form)
+        font_frame.grid(row=3, column=1, sticky="w", pady=(5, 0))
+
+        ttk.Label(font_frame, text="Font Size:").pack(side="left", padx=(0, 8))
+
+        font_size_var = tk.IntVar(value=12)
+
+        font_size_combo = ttk.Combobox(
+            font_frame,
+            textvariable=font_size_var,
+            values=(10, 11, 12, 14, 16, 18, 20, 24),
+            width=5,
+            state="readonly"
+        )
+        font_size_combo.pack(side="left")
+
+        def change_font_size(event=None):
+            content_text.configure(
+                font=("TkDefaultFont", font_size_var.get())
+            )
+
+        font_size_combo.bind("<<ComboboxSelected>>", change_font_size)
+
         # Right-click editing menu
         content_menu = tk.Menu(content_text, tearoff=0)
         content_menu.add_command(label="Cut", command=lambda: content_text.event_generate("<<Cut>>"))
-        content_menu.add_command(label="Copy", command=lambda: content_text.event_generate("<<Copy>>"))
+        content_menu.add_command(
+            label="Copy",
+            command=lambda: copy_selected_text_with_hyperlinks(content_text)
+        )
         content_menu.add_command(label="Paste", command=lambda: content_text.event_generate("<<Paste>>"))
         content_menu.add_separator()
-        content_menu.add_command(label="Select All", command=lambda: content_text.tag_add("sel", "1.0", "end"))
+        def select_all_content_text(event=None):
+            content_text.tag_add("sel", "1.0", "end")
+            content_text.mark_set("insert", "1.0")
+            content_text.see("1.0")
+            return "break"
+
+        content_menu.add_command(label="Select All", command=select_all_content_text)
+
+        content_text.bind("<Control-a>", select_all_content_text)
+        content_text.bind("<Control-c>", lambda event: copy_selected_text_with_hyperlinks(content_text))
 
         def show_content_menu(event):
             content_menu.tk_popup(event.x_root, event.y_root)
