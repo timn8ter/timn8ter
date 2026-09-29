@@ -4598,12 +4598,10 @@ def main():
 
     root = tk.Tk()
     root.bind_class("Text", "<Control-k>", hyperlink_ctrl_k)
-    root.attributes("-zoomed", True)
     root.title("Bible Study")
-    root.geometry("950x700")
+    root.geometry("950x620")
     root.minsize(800, 600)
     root.configure(bg="#f4f1ea")
-
     # Start calendar reminder checker
     check_calendar_reminders(root)
 
@@ -4659,12 +4657,14 @@ def main():
         content,
         bg="white",
         bd=1,
-        relief="solid"
+        relief="solid",
+        height=155
     )
     verse_frame.pack(
         fill="x",
         pady=(0, 20)
     )
+    verse_frame.pack_propagate(False)
 
     tk.Label(
         verse_frame,
@@ -4677,7 +4677,7 @@ def main():
     verse_label = tk.Label(
         verse_frame,
         text=verse_text,
-        wraplength=820,
+        wraplength=900,
         justify="center",
         font=("TkDefaultFont", 13),
         bg="white",
@@ -4725,7 +4725,7 @@ def main():
         fill="x",
         pady=(0, 5)
     )
-    lower_frame.configure(height=300)
+    lower_frame.configure(height=210)
     lower_frame.pack_propagate(False)
 
     lower_frame.columnconfigure(0, weight=1)
